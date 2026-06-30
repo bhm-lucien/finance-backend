@@ -46,37 +46,46 @@ async def on_ready():
 
 
 @bot.tree.command(name="stock", description="查詢個股 AI 操盤建議")
-@app_commands.describe(stock_id="股票代碼（如 2330）")
+@app_commands.describe(stock_id="股票代碼或名稱（如 2330 或 台積電）")
 async def stock_command(interaction: discord.Interaction, stock_id: str):
     """
     /stock 指令 — 查詢個股 AI 操盤建議
+    支援代碼（2330）或名稱（台積電）
     """
     await interaction.response.defer(thinking=True)
 
     try:
+        # 如果輸入的不是純數字，嘗試用名稱查找代碼
+        actual_id = stock_id.strip()
+        if not actual_id.isdigit():
+            actual_id = _find_stock_id_by_name(actual_id)
+            if not actual_id:
+                await interaction.followup.send(f"❌ 找不到「{stock_id}」對應的股票，請確認名稱或直接輸入代碼")
+                return
+
         # 呼叫分析函式
         from app.indicators.trading_advice import generate_trading_advice
         from app.services.realtime import fetch_realtime_price
         from app.indicators.kline_pattern import analyze_kline_patterns
 
         # 取得即時報價
-        rt = fetch_realtime_price(stock_id)
+        rt = fetch_realtime_price(actual_id)
         price = rt.get("price", 0)
         change = rt.get("change", 0)
         change_pct = rt.get("change_pct", 0)
-        name = rt.get("name", stock_id)
+        name = rt.get("name", actual_id)
 
         # 取得 AI 操盤建議
-        advice = generate_trading_advice(stock_id)
+        advice = generate_trading_advice(actual_id)
         if advice.get("error"):
-            await interaction.followup.send(f"❌ 無法分析 {stock_id}：{advice['error']}")
+            await interaction.followup.send(f"❌ 無法分析 {actual_id}：{advice['error']}")
             return
 
         # 取得 K 線型態
-        kline = analyze_kline_patterns(stock_id)
+        kline = analyze_kline_patterns(actual_id)
 
         # 組裝 Embed 訊息
-        embed = _build_stock_embed(stock_id, name, price, change, change_pct, advice, kline)
+        embed = _build_stock_embed(actual_id, name, price, change, change_pct, advice, kline)
         await interaction.followup.send(embed=embed)
 
     except Exception as e:
@@ -185,6 +194,24 @@ async def market_command(interaction: discord.Interaction):
 
     except Exception as e:
         await interaction.followup.send(f"❌ 取得市場資料失敗：{str(e)[:200]}")
+
+
+def _find_stock_id_by_name(name: str) -> str | None:
+    """用股票名稱查找代碼"""
+    try:
+        from app.services.stock_list import fetch_all_stocks
+        stocks = fetch_all_stocks()
+        # 精確匹配
+        for s in stocks:
+            if s.get("name", "") == name:
+                return s["id"]
+        # 部分匹配（包含）
+        for s in stocks:
+            if name in s.get("name", ""):
+                return s["id"]
+    except Exception:
+        pass
+    return None
 
 
 def _build_stock_embed(stock_id: str, name: str, price: float, change: float, change_pct: float, advice: dict, kline: dict) -> discord.Embed:
