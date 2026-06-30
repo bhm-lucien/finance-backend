@@ -34,6 +34,16 @@ async def on_ready():
     except Exception as e:
         print(f"[Discord Bot] 指令同步失敗: {e}")
 
+    # 啟動定時排程和盤中掃描
+    try:
+        from app.bot.scheduler import setup_scheduler
+        from app.bot.realtime_scanner import setup_realtime_scanner
+        setup_scheduler(bot)
+        setup_realtime_scanner(bot)
+        print("[Discord Bot] 定時排程和盤中掃描已啟動")
+    except Exception as e:
+        print(f"[Discord Bot] 排程啟動失敗: {e}")
+
 
 @bot.tree.command(name="stock", description="查詢個股 AI 操盤建議")
 @app_commands.describe(stock_id="股票代碼（如 2330）")
@@ -85,12 +95,96 @@ async def help_command(interaction: discord.Interaction):
         name="指令列表",
         value=(
             "`/stock 2330` — 查詢個股 AI 操盤建議\n"
+            "`/strong` — 今日強勢股篩選\n"
+            "`/market` — 美股 + 台指期最新資訊\n"
             "`/help` — 顯示此說明"
+        ),
+        inline=False,
+    )
+    embed.add_field(
+        name="自動推播",
+        value=(
+            "🌅 每日 8:30 — 盤前分析（夜盤 + 美股 + 強勢股）\n"
+            "🚀 盤中即時 — 飆股警報（漲>3% + 突破 + 量增）\n"
+            "🌆 每日 14:00 — 盤後總結"
         ),
         inline=False,
     )
     embed.set_footer(text="ECF-AI SYSTEM v0.1.0")
     await interaction.response.send_message(embed=embed)
+
+
+@bot.tree.command(name="strong", description="篩選今日強勢股")
+@app_commands.describe(industry="產業篩選（選填，如：半導體）")
+async def strong_command(interaction: discord.Interaction, industry: str = ""):
+    """篩選強勢股"""
+    await interaction.response.defer(thinking=True)
+
+    try:
+        from app.services.stock_screener import screen_strong_stocks
+        stocks = screen_strong_stocks(top_n=5, industry=industry)
+
+        if not stocks:
+            await interaction.followup.send("❌ 目前沒有符合條件的強勢股")
+            return
+
+        title = f"🔥 強勢股篩選 — {industry}" if industry else "🔥 今日強勢股 TOP 5"
+        embed = discord.Embed(title=title, color=0xFF4757)
+
+        for i, s in enumerate(stocks, 1):
+            embed.add_field(
+                name=f"{i}. {s['stock_id']} {s['name']} — {s['price']}（+{s['change_pct']:.1f}%）",
+                value=f"評分：{s['score']}/100 | {' | '.join(s['reasons'][:3])}",
+                inline=False,
+            )
+
+        embed.set_footer(text="⚠️ 僅供參考 | ECF-AI")
+        await interaction.followup.send(embed=embed)
+
+    except Exception as e:
+        await interaction.followup.send(f"❌ 篩選失敗：{str(e)[:200]}")
+
+
+@bot.tree.command(name="market", description="查詢美股 + 台指期最新資訊")
+async def market_command(interaction: discord.Interaction):
+    """查詢市場資訊"""
+    await interaction.response.defer(thinking=True)
+
+    try:
+        from app.services.futures import fetch_taiwan_futures
+        from app.services.us_market import fetch_us_market_summary
+
+        futures = fetch_taiwan_futures()
+        us_market = fetch_us_market_summary()
+
+        embed = discord.Embed(title="🌐 全球市場概況", color=0x00D4FF)
+
+        # 台指期
+        if futures["price"] > 0:
+            arrow = "▲" if futures["change"] >= 0 else "▼"
+            embed.add_field(
+                name="📊 台指期",
+                value=f"**{futures['price']:.0f}** {arrow}{abs(futures['change']):.0f} ({abs(futures['change_pct']):.2f}%)\n{futures['session']}",
+                inline=True,
+            )
+
+        # 美股指數
+        if us_market["indices"]:
+            us_text = ""
+            for idx in us_market["indices"]:
+                arrow = "▲" if idx["change_pct"] >= 0 else "▼"
+                us_text += f"{idx['name']}：{arrow}{abs(idx['change_pct']):.2f}%\n"
+            embed.add_field(name="🇺🇸 美股指數", value=us_text, inline=True)
+
+        # 摘要
+        if us_market.get("summary"):
+            embed.add_field(name="📝 摘要", value=us_market["summary"], inline=False)
+
+        embed.set_footer(text=f"更新：{us_market.get('update_time', '--')} | ECF-AI")
+        await interaction.followup.send(embed=embed)
+
+    except Exception as e:
+        await interaction.followup.send(f"❌ 取得市場資料失敗：{str(e)[:200]}")
 
 
 def _build_stock_embed(stock_id: str, name: str, price: float, change: float, change_pct: float, advice: dict, kline: dict) -> discord.Embed:
