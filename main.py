@@ -44,9 +44,13 @@ async def health_check():
 
 @app.on_event("startup")
 async def startup_event():
-    """後端啟動時，在背景執行緒預先訓練 LSTM 模型"""
+    """後端啟動時，在背景執行緒預先訓練 LSTM 模型（如果 torch 可用）"""
     def _pretrain():
         try:
+            import importlib
+            if importlib.util.find_spec("torch") is None:
+                print("[啟動] PyTorch 未安裝，跳過 LSTM 預訓練")
+                return
             from app.models.lstm_predictor import get_predictor
             print("[啟動] 背景預訓練 LSTM 模型 (2330 台積電)...")
             predictor = get_predictor("2330")
