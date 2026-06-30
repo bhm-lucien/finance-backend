@@ -25,10 +25,12 @@ async def on_ready():
     """Bot 啟動完成"""
     print(f"[Discord Bot] 已登入：{bot.user} (ID: {bot.user.id})")
     print(f"[Discord Bot] 已連接 {len(bot.guilds)} 個伺服器")
-    # 同步斜線指令
+    # Guild-specific 同步（立即生效）
     try:
-        synced = await bot.tree.sync()
-        print(f"[Discord Bot] 已同步 {len(synced)} 個斜線指令")
+        guild = discord.Object(id=1521456332530782289)
+        bot.tree.copy_global_to(guild=guild)
+        synced = await bot.tree.sync(guild=guild)
+        print(f"[Discord Bot] 已同步 {len(synced)} 個斜線指令到伺服器")
     except Exception as e:
         print(f"[Discord Bot] 指令同步失敗: {e}")
 
