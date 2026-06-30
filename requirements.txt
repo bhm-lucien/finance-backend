@@ -10,3 +10,4 @@ ta==0.11.0
 httpx==0.27.2
 discord.py==2.3.2
 yfinance==0.2.40
+feedparser==6.0.11
