@@ -200,15 +200,23 @@ def _find_stock_id_by_name(name: str) -> str | None:
     """用股票名稱查找代碼"""
     try:
         from app.services.stock_list import fetch_all_stocks
-        stocks = fetch_all_stocks()
+        stocks = fetch_all_stocks()  # 回傳 {stock_id: stock_name} dict
+
         # 精確匹配
-        for s in stocks:
-            if s.get("name", "") == name:
-                return s["id"]
-        # 部分匹配（包含）
-        for s in stocks:
-            if name in s.get("name", ""):
-                return s["id"]
+        for sid, sname in stocks.items():
+            if sname == name:
+                return sid
+
+        # 部分匹配（名稱包含輸入）
+        for sid, sname in stocks.items():
+            if name in sname:
+                return sid
+
+        # 反向部分匹配（輸入包含名稱）
+        for sid, sname in stocks.items():
+            if sname in name and len(sname) >= 2:
+                return sid
+
     except Exception:
         pass
     return None
