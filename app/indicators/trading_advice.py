@@ -591,31 +591,91 @@ def _generate_predictions(df: pd.DataFrame, current_price: float, atr: float,
     est_high = round(min(current_price + atr * 0.3, limit_up), 2)
     est_low = round(max(current_price - atr * 0.3, limit_down), 2)
 
-    # 預估收盤：根據趨勢和指標，也限制在漲跌停內
-    # 如果已經接近漲停（< 2%），預估收盤不會再到漲停
+    # ── 收盤預估（多因素綜合）──
+    # 因素 1：今日開高低收結構
+    today_open = float(df["open"].iloc[-1])
+    today_high = float(df["high"].iloc[-1])
+    today_low = float(df["low"].iloc[-1])
+    today_range = today_high - today_low if today_high > today_low else 0.01
+
+    # 目前價格在今日區間的位置（0=最低, 1=最高）
+    price_position = (current_price - today_low) / today_range if today_range > 0 else 0.5
+
+    # 因素 2：K棒方向慣性（紅K傾向收高，黑K傾向收低）
+    body_direction = 1 if current_price > today_open else -1
+
+    # 因素 3：近5日收盤相對開盤的統計（上漲日收盤傾向）
+    recent_5 = df.tail(5)
+    close_vs_open = (recent_5["close"] - recent_5["open"]).mean()
+    close_tendency = close_vs_open / current_price * 100  # 轉為百分比
+
+    # 因素 4：量價配合
+    vol_today_val = float(df["volume"].iloc[-1])
+    vol_avg_20 = float(df["volume"].tail(20).mean())
+    vol_ratio_val = vol_today_val / vol_avg_20 if vol_avg_20 > 0 else 1
+
+    # ── 綜合計算預估收盤 ──
+    # 基礎：現價
+    est_close = current_price
+
+    # 調整因素加總
+    adjustment = 0
+
+    # 離漲跌停很近 → 預估不會再漲/跌
     if dist_to_limit_up_pct < 2:
-        # 接近漲停，大概率高檔震盪或小拉回
-        est_close = round(current_price * 0.995, 2)
+        # 接近漲停，高機率維持高檔或小拉回
+        adjustment = -current_price * 0.003  # 微幅拉回 0.3%
         intraday_reason = "接近漲停，預估高檔震盪"
     elif dist_to_limit_down_pct < 2:
-        # 接近跌停，大概率低檔震盪或小反彈
-        est_close = round(current_price * 1.005, 2)
-        intraday_reason = "接近跌停，預估低檔震盪"
-    elif rsi > 65 and macd_hist > 0:
-        est_close = round(min(current_price + atr * 0.1, limit_up), 2)
-        intraday_reason = "指標偏強，預估收盤偏高"
-    elif rsi < 35 and macd_hist < 0:
-        est_close = round(max(current_price - atr * 0.1, limit_down), 2)
-        intraday_reason = "指標偏弱，預估收盤偏低"
-    elif k_val > 80:
-        est_close = round(max(current_price - atr * 0.05, limit_down), 2)
-        intraday_reason = "KD 過熱，尾盤可能拉回"
-    elif k_val < 20:
-        est_close = round(min(current_price + atr * 0.05, limit_up), 2)
-        intraday_reason = "KD 超賣，尾盤可能反彈"
+        adjustment = current_price * 0.003
+        intraday_reason = "接近跌停，預估低檔止穩"
     else:
-        est_close = current_price
-        intraday_reason = "多空均衡，預估收平"
+        # 根據各因素計算
+        # 因素 1：價格位置（在高檔傾向收高，在低檔傾向收低）
+        position_adj = (price_position - 0.5) * atr * 0.05
+
+        # 因素 2：K棒方向
+        body_adj = body_direction * atr * 0.02
+
+        # 因素 3：近期收盤傾向
+        tendency_adj = close_tendency * current_price / 100 * 0.3
+
+        # 因素 4：量價配合（帶量漲更容易收高）
+        if vol_ratio_val > 1.3 and body_direction > 0:
+            vol_adj = atr * 0.02
+        elif vol_ratio_val > 1.3 and body_direction < 0:
+            vol_adj = -atr * 0.02
+        else:
+            vol_adj = 0
+
+        # 因素 5：RSI/KD 過熱修正
+        if rsi > 75 or k_val > 85:
+            overheat_adj = -atr * 0.03  # 過熱尾盤易拉回
+        elif rsi < 25 or k_val < 15:
+            overheat_adj = atr * 0.03  # 超賣尾盤易反彈
+        else:
+            overheat_adj = 0
+
+        adjustment = position_adj + body_adj + tendency_adj + vol_adj + overheat_adj
+
+        # 產生理由
+        if adjustment > 0:
+            intraday_reason = "多方結構，預估收盤偏高"
+            if vol_ratio_val > 1.3:
+                intraday_reason += "，量能配合"
+        elif adjustment < 0:
+            intraday_reason = "空方結構，預估收盤偏低"
+            if rsi > 75:
+                intraday_reason += "，指標過熱"
+        else:
+            intraday_reason = "多空均衡，預估收平"
+
+    # 最終預估收盤
+    est_close = round(current_price + adjustment, 2)
+    # 限制在漲跌停和合理範圍（不超過現價的 ±2%）
+    est_close = max(est_close, current_price * 0.98, limit_down)
+    est_close = min(est_close, current_price * 1.02, limit_up)
+    est_close = round(est_close, 2)
 
     # ── 盤後預測：明日走勢 ──
     tomorrow_direction = "觀望"
