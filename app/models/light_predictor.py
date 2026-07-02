@@ -103,13 +103,26 @@ def predict_price(stock_id: str, days_history: int = 120, days_forecast: int = 1
         if idx >= 0:
             history.append({
                 "date": str(pd.Timestamp(dates[idx]).date()),
-                "price": float(close[idx]),
+                "close": float(close[idx]),
             })
+
+    # 預測資料（加上日期，相容 PredictionChart 格式）
+    from datetime import timedelta
+    last_date = pd.Timestamp(dates[-1])
+    predictions_formatted = []
+    for p in predictions:
+        pred_date = last_date + timedelta(days=p["day"])
+        predictions_formatted.append({
+            "date": str(pred_date.date()),
+            "close": p["price"],
+            "upper": p["upper"],
+            "lower": p["lower"],
+        })
 
     return {
         "current_price": current_price,
         "history": history,
-        "predictions": predictions,
+        "predictions": predictions_formatted,
         "trend": trend,
         "confidence": confidence,
         "method": "linear_regression",
