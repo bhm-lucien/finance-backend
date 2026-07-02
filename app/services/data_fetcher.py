@@ -11,7 +11,7 @@ from datetime import datetime, timedelta
 from app.config import FINMIND_API_URL, FINMIND_TOKEN
 
 
-# ── 快取機制 ──────────────────────────────────────────
+# ── 快取機制（二層：記憶體 + SQLite 持久化）──────────────
 
 _cache: dict[str, dict] = {}
 CACHE_TTL = 3600  # 快取有效期 1 小時（秒）
@@ -22,19 +22,47 @@ os.makedirs(BACKUP_DIR, exist_ok=True)
 
 
 def _get_cache(key: str):
-    """從快取取得資料，若過期回傳 None"""
+    """
+    從快取取得資料（二層）
+    1. 先查記憶體快取（最快）
+    2. 記憶體沒有再查 SQLite（持久化）
+    """
+    # 第一層：記憶體
     if key in _cache:
         entry = _cache[key]
         if time.time() - entry["time"] < CACHE_TTL:
             return entry["data"]
         else:
             del _cache[key]
+
+    # 第二層：SQLite
+    try:
+        from app.services.cache_db import cache_get
+        data = cache_get(f"df_{key}")
+        if data is not None:
+            df = pd.DataFrame(data)
+            # 確保 date 欄位是 datetime 型別
+            if "date" in df.columns:
+                df["date"] = pd.to_datetime(df["date"])
+            # 回填記憶體快取
+            _cache[key] = {"data": df, "time": time.time()}
+            return df
+    except Exception:
+        pass
+
     return None
 
 
 def _set_cache(key: str, data):
-    """存入快取"""
+    """存入快取（二層）"""
     _cache[key] = {"data": data, "time": time.time()}
+    # 也存到 SQLite（DataFrame 轉為 list of dict）
+    try:
+        from app.services.cache_db import cache_set
+        if isinstance(data, pd.DataFrame):
+            cache_set(f"df_{key}", data.to_dict(orient="records"), ttl=CACHE_TTL)
+    except Exception:
+        pass
 
 
 def _save_backup(key: str, raw_data: list):

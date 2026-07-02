@@ -28,6 +28,25 @@ US_TECH_STOCKS = {
     "AVGO": "博通",
 }
 
+# 費城半導體指數主要成分股
+SOX_COMPONENTS = {
+    "NVDA": "輝達",
+    "AMD": "超微",
+    "AVGO": "博通",
+    "QCOM": "高通",
+    "TXN": "德儀",
+    "INTC": "英特爾",
+    "MU": "美光",
+    "LRCX": "科磊",
+    "AMAT": "應材",
+    "KLAC": "科磊",
+    "MRVL": "Marvell",
+    "TSM": "台積電ADR",
+    "ASML": "艾司摩爾",
+    "ARM": "安謀",
+    "ON": "安森美",
+}
+
 
 def fetch_us_market_summary() -> dict:
     """
@@ -64,6 +83,9 @@ def fetch_us_market_summary() -> dict:
             data["name"] = name
             tech_stocks.append(data)
 
+    # 取得費半成分股漲幅前三名
+    sox_top3 = _fetch_sox_top3()
+
     # 產生摘要
     summary = _generate_summary(indices, tech_stocks)
 
@@ -71,12 +93,27 @@ def fetch_us_market_summary() -> dict:
     result = {
         "indices": indices,
         "tech_stocks": tech_stocks,
+        "sox_top3": sox_top3,
         "summary": summary,
         "update_time": datetime.now().strftime("%Y-%m-%d %H:%M"),
     }
 
     _us_cache[cache_key] = {"data": result, "time": time.time()}
     return result
+
+
+def _fetch_sox_top3() -> list[dict]:
+    """取得費半成分股漲幅前三名"""
+    all_stocks = []
+    for symbol, name in SOX_COMPONENTS.items():
+        data = _fetch_quote(symbol)
+        if data:
+            data["name"] = name
+            all_stocks.append(data)
+
+    # 按漲幅排序取前三
+    all_stocks.sort(key=lambda x: x["change_pct"], reverse=True)
+    return all_stocks[:3]
 
 
 def _fetch_quote(symbol: str) -> dict | None:

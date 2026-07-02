@@ -20,17 +20,37 @@ intents.message_content = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 
 
+@bot.tree.error
+async def on_app_command_error(interaction: discord.Interaction, error: app_commands.AppCommandError):
+    """全域指令錯誤處理"""
+    import traceback
+    print(f"[Discord Bot] 指令錯誤: {error}")
+    traceback.print_exception(type(error), error, error.__traceback__)
+    # 嘗試回覆錯誤，失敗就靜默
+    try:
+        if interaction.response.is_done():
+            await interaction.followup.send(f"❌ {str(error)[:200]}", ephemeral=True)
+        else:
+            await interaction.response.send_message(f"❌ {str(error)[:200]}", ephemeral=True)
+    except Exception:
+        pass
+
+
 @bot.event
 async def on_ready():
     """Bot 啟動完成"""
     print(f"[Discord Bot] 已登入：{bot.user} (ID: {bot.user.id})")
     print(f"[Discord Bot] 已連接 {len(bot.guilds)} 個伺服器")
+    print(f"[Discord Bot] 已註冊的指令: {[cmd.name for cmd in bot.tree.get_commands()]}")
     # Guild-specific 同步（立即生效）
     try:
         guild = discord.Object(id=1521456332530782289)
         bot.tree.copy_global_to(guild=guild)
         synced = await bot.tree.sync(guild=guild)
         print(f"[Discord Bot] 已同步 {len(synced)} 個斜線指令到伺服器")
+        # 也清除全域殘留
+        bot.tree.clear_commands(guild=None)
+        await bot.tree.sync()
     except Exception as e:
         print(f"[Discord Bot] 指令同步失敗: {e}")
 
@@ -123,21 +143,25 @@ async def help_command(interaction: discord.Interaction):
     await interaction.response.send_message(embed=embed)
 
 
-@bot.tree.command(name="strong", description="篩選今日強勢股")
-@app_commands.describe(industry="產業篩選（選填，如：半導體）")
-async def strong_command(interaction: discord.Interaction, industry: str = ""):
-    """篩選強勢股"""
-    await interaction.response.defer(thinking=True)
+@bot.tree.command(name="top", description="篩選今日全市場強勢股 TOP 5")
+async def top_command(interaction: discord.Interaction):
+    """篩選全市場強勢股"""
+    print("[Discord /strong] 指令觸發！")
+    
+    try:
+        await interaction.response.defer(thinking=True)
+    except Exception:
+        pass
 
     try:
         from app.services.stock_screener import screen_strong_stocks
-        stocks = screen_strong_stocks(top_n=5, industry=industry)
+        stocks = screen_strong_stocks(top_n=5, industry="")
 
         if not stocks:
             await interaction.followup.send("❌ 目前沒有符合條件的強勢股")
             return
 
-        title = f"🔥 強勢股篩選 — {industry}" if industry else "🔥 今日強勢股 TOP 5"
+        title = "🔥 今日強勢股 TOP 5"
         embed = discord.Embed(title=title, color=0xFF4757)
 
         for i, s in enumerate(stocks, 1):
@@ -151,6 +175,45 @@ async def strong_command(interaction: discord.Interaction, industry: str = ""):
         await interaction.followup.send(embed=embed)
 
     except Exception as e:
+        import traceback
+        traceback.print_exc()
+        try:
+            await interaction.followup.send(f"❌ 篩選失敗：{str(e)[:200]}")
+        except Exception:
+            pass
+
+
+@bot.tree.command(name="strong_industry", description="篩選特定產業強勢股")
+@app_commands.describe(industry="產業名稱（如：半導體、金融、航運）")
+async def strong_industry_command(interaction: discord.Interaction, industry: str):
+    """篩選特定產業強勢股"""
+    await interaction.response.defer(thinking=True)
+
+    try:
+        from app.services.stock_screener import screen_strong_stocks
+        stocks = screen_strong_stocks(top_n=5, industry=industry)
+
+        if not stocks:
+            await interaction.followup.send(f"❌ 目前「{industry}」沒有符合條件的強勢股")
+            return
+
+        title = f"🔥 強勢股篩選 — {industry}"
+        embed = discord.Embed(title=title, color=0xFF4757)
+
+        for i, s in enumerate(stocks, 1):
+            embed.add_field(
+                name=f"{i}. {s['stock_id']} {s['name']} — {s['price']}（+{s['change_pct']:.1f}%）",
+                value=f"評分：{s['score']}/100 | {' | '.join(s['reasons'][:3])}",
+                inline=False,
+            )
+
+        embed.set_footer(text="⚠️ 僅供參考 | ECF-AI")
+        await interaction.followup.send(embed=embed)
+
+    except Exception as e:
+        import traceback
+        print(f"[Discord /strong_industry] 完整錯誤:")
+        traceback.print_exc()
         await interaction.followup.send(f"❌ 篩選失敗：{str(e)[:200]}")
 
 
@@ -173,17 +236,43 @@ async def market_command(interaction: discord.Interaction):
             arrow = "▲" if futures["change"] >= 0 else "▼"
             embed.add_field(
                 name="📊 台指期",
-                value=f"**{futures['price']:.0f}** {arrow}{abs(futures['change']):.0f} ({abs(futures['change_pct']):.2f}%)\n{futures['session']}",
-                inline=True,
+                value=f"**{futures['price']:,.0f}** {arrow}{abs(futures['change']):,.0f} ({abs(futures['change_pct']):.2f}%)\n高：{futures['high']:,.0f} ｜ 低：{futures['low']:,.0f}\n盤別：{futures['session']}",
+                inline=False,
+            )
+        else:
+            embed.add_field(
+                name="📊 台指期",
+                value="⚠️ 暫時無法取得資料",
+                inline=False,
             )
 
-        # 美股指數
+        # 美股指數（含實際數字）
         if us_market["indices"]:
             us_text = ""
             for idx in us_market["indices"]:
                 arrow = "▲" if idx["change_pct"] >= 0 else "▼"
-                us_text += f"{idx['name']}：{arrow}{abs(idx['change_pct']):.2f}%\n"
-            embed.add_field(name="🇺🇸 美股指數", value=us_text, inline=True)
+                sign = "+" if idx["change"] >= 0 else ""
+                us_text += f"**{idx['name']}**：{idx['price']:,.0f} {arrow}{sign}{idx['change']:,.0f} ({sign}{idx['change_pct']:.2f}%)\n"
+            embed.add_field(name="🇺🇸 美股指數", value=us_text, inline=False)
+
+        # 費半成分股漲幅前三名
+        sox_top3 = us_market.get("sox_top3", [])
+        if sox_top3:
+            sox_text = ""
+            for i, s in enumerate(sox_top3, 1):
+                arrow = "▲" if s["change_pct"] >= 0 else "▼"
+                sign = "+" if s["change"] >= 0 else ""
+                sox_text += f"{i}. **{s['name']}**（{s['symbol']}）：${s['price']:.1f} {arrow}{sign}{s['change']:.1f} ({sign}{s['change_pct']:.2f}%)\n"
+            embed.add_field(name="🔥 費半漲幅前三", value=sox_text, inline=False)
+
+        # 科技股重點
+        if us_market.get("tech_stocks"):
+            tech_text = ""
+            for stock in us_market["tech_stocks"][:6]:
+                arrow = "▲" if stock["change_pct"] >= 0 else "▼"
+                sign = "+" if stock["change"] >= 0 else ""
+                tech_text += f"{stock['name']}：${stock['price']:.1f} {arrow}{sign}{stock['change_pct']:.2f}%\n"
+            embed.add_field(name="💻 科技股", value=tech_text, inline=False)
 
         # 摘要
         if us_market.get("summary"):
@@ -193,6 +282,8 @@ async def market_command(interaction: discord.Interaction):
         await interaction.followup.send(embed=embed)
 
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         await interaction.followup.send(f"❌ 取得市場資料失敗：{str(e)[:200]}")
 
 
@@ -307,6 +398,14 @@ async def start_bot():
         return
 
     try:
+        # discord.py 2.4+ 需要在 start 之前確保沒有殘留的 session
+        if bot.is_closed():
+            # 如果 bot 已經被關閉過，需要重新建立
+            pass
         await bot.start(DISCORD_TOKEN)
+    except discord.LoginFailure as e:
+        print(f"[Discord Bot] 登入失敗（Token 無效？）: {e}")
+    except discord.PrivilegedIntentsRequired as e:
+        print(f"[Discord Bot] 缺少必要的 Intents 權限: {e}")
     except Exception as e:
-        print(f"[Discord Bot] 啟動失敗: {e}")
+        print(f"[Discord Bot] 啟動失敗: {type(e).__name__}: {e}")

@@ -93,25 +93,40 @@ def _fetch_from_taifex() -> dict:
 
 
 def _fetch_from_yahoo_futures() -> dict:
-    """備援：從 Yahoo Finance 取得台指期"""
+    """備援：從 Yahoo Finance 取得台指期/加權指數"""
     try:
-        import yfinance as yf
-        ticker = yf.Ticker("^TWII")
-        info = ticker.fast_info
-        price = float(info.get("lastPrice", 0) or 0)
-        prev = float(info.get("previousClose", 0) or 0)
+        headers = {"User-Agent": "Mozilla/5.0"}
+        # 先試台指期近月合約
+        for symbol in ["TWF=F", "^TWII"]:
+            try:
+                url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?interval=1d&range=2d"
+                response = requests.get(url, headers=headers, timeout=10)
+                if response.status_code != 200:
+                    continue
 
-        if price > 0 and prev > 0:
-            return {
-                "price": price,
-                "change": round(price - prev, 2),
-                "change_pct": round((price - prev) / prev * 100, 2),
-                "high": float(info.get("dayHigh", 0) or 0),
-                "low": float(info.get("dayLow", 0) or 0),
-                "volume": 0,
-                "session": "收盤",
-                "time": "",
-            }
+                data = response.json()
+                chart = data.get("chart", {}).get("result", [])
+                if not chart:
+                    continue
+
+                meta = chart[0].get("meta", {})
+                price = float(meta.get("regularMarketPrice", 0))
+                prev = float(meta.get("chartPreviousClose", 0) or meta.get("previousClose", 0))
+
+                if price > 0 and prev > 0:
+                    session = "台指期" if symbol == "TWF=F" else "加權指數"
+                    return {
+                        "price": price,
+                        "change": round(price - prev, 2),
+                        "change_pct": round((price - prev) / prev * 100, 2),
+                        "high": float(meta.get("regularMarketDayHigh", 0) or 0),
+                        "low": float(meta.get("regularMarketDayLow", 0) or 0),
+                        "volume": int(meta.get("regularMarketVolume", 0) or 0),
+                        "session": session,
+                        "time": "",
+                    }
+            except Exception:
+                continue
     except Exception:
         pass
 

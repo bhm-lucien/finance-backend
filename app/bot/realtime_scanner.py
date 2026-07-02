@@ -85,7 +85,12 @@ def _scan_for_hot_stocks() -> list[dict]:
     try:
         # 取得股票清單（只掃描主要股票避免 API 超量）
         all_stocks = fetch_all_stocks()
-        stocks = [s for s in all_stocks if len(s["id"]) == 4 and s["id"].isdigit()][:50]
+        # all_stocks 是 {stock_id: stock_name} dict，轉為 list of dict
+        stocks = [
+            {"id": sid, "name": sname}
+            for sid, sname in all_stocks.items()
+            if len(sid) == 4 and sid.isdigit()
+        ][:50]
 
         for stock in stocks:
             try:

@@ -10,6 +10,9 @@ load_dotenv()
 FINMIND_API_URL = "https://api.finmindtrade.com/api/v4/data"
 FINMIND_TOKEN = os.getenv("FINMIND_TOKEN", "")  # 免費方案可不填
 
+# 富果（Fugle）MarketData API 設定
+FUGLE_API_KEY = os.getenv("FUGLE_API_KEY", "")
+
 # 預設股票代碼
 DEFAULT_STOCK_ID = "2330"
 

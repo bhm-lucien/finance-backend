@@ -13,23 +13,48 @@ REALTIME_CACHE_TTL = 10
 
 def fetch_realtime_price(stock_id: str) -> dict:
     """
-    從證交所 + Yahoo Finance 取得即時報價（多源整合）
+    取得即時報價（多源整合）
 
     優先級：
-    1. 證交所即時 API（最即時，但偶爾不穩定）
-    2. Yahoo Finance 台灣（穩定但可能延遲 15 秒）
+    1. 富果 WebSocket 即時推播（最快、最穩定）
+    2. 證交所即時 API（fallback）
+    3. Yahoo Finance 台灣（最後備援）
 
     Returns:
         dict 包含即時報價資訊
     """
-    # 快取檢查
+    # 優先從富果 WebSocket 快取取得
+    try:
+        from app.services.fugle_ws import get_fugle_quote, is_fugle_connected, subscribe_stock
+        fugle_data = get_fugle_quote(stock_id)
+        if fugle_data and fugle_data.get("price", 0) > 0:
+            # 檢查資料是否過於陳舊（超過 30 秒視為可能有問題）
+            updated_at = fugle_data.get("updated_at", 0)
+            if time.time() - updated_at < 30:
+                return fugle_data
+
+        # 如果富果已連線但還沒有此股票的資料，觸發訂閱
+        if is_fugle_connected():
+            import asyncio
+            try:
+                loop = asyncio.get_event_loop()
+                if loop.is_running():
+                    loop.create_task(subscribe_stock(stock_id))
+                else:
+                    asyncio.run(subscribe_stock(stock_id))
+            except RuntimeError:
+                pass
+    except ImportError:
+        pass
+
+    # Fallback: 快取檢查
     cache_key = f"rt_{stock_id}"
     if cache_key in _realtime_cache:
         entry = _realtime_cache[cache_key]
         if time.time() - entry["time"] < REALTIME_CACHE_TTL:
             return entry["data"]
 
-    # 嘗試證交所 API
+    # Fallback: 嘗試證交所 API
     result = _fetch_from_twse(stock_id)
 
     # 如果證交所失敗或價格為 0，用 Yahoo Finance 補充

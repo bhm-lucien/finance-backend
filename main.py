@@ -31,6 +31,23 @@ async def lifespan(app: FastAPI):
     thread = threading.Thread(target=_pretrain, daemon=True)
     thread.start()
 
+    # 啟動富果 WebSocket 即時報價
+    try:
+        from app.services.fugle_ws import init_fugle_ws, shutdown_fugle_ws
+        await init_fugle_ws()
+        print("[啟動] 富果 WebSocket 即時報價服務已啟動")
+    except Exception as e:
+        print(f"[啟動] 富果 WebSocket 啟動失敗（將使用 fallback）: {e}")
+
+    # 背景預計算熱門股票資料
+    try:
+        from app.services.precompute import start_precompute, schedule_daily_precompute
+        start_precompute()
+        schedule_daily_precompute()
+        print("[啟動] 背景預計算已啟動")
+    except Exception as e:
+        print(f"[啟動] 預計算啟動失敗: {e}")
+
     # 啟動 Discord Bot（在背景 asyncio task）
     bot_task = None
     try:
@@ -45,6 +62,11 @@ async def lifespan(app: FastAPI):
     # 關閉時
     if bot_task:
         bot_task.cancel()
+    try:
+        from app.services.fugle_ws import shutdown_fugle_ws
+        await shutdown_fugle_ws()
+    except Exception:
+        pass
 
 
 app = FastAPI(
@@ -68,10 +90,12 @@ app.add_middleware(
 from app.api.stock import router as stock_router
 from app.api.predict import router as predict_router
 from app.api.backtest import router as backtest_router
+from app.api.ws import router as ws_router
 
 app.include_router(stock_router)
 app.include_router(predict_router)
 app.include_router(backtest_router)
+app.include_router(ws_router)
 
 
 @app.get("/")

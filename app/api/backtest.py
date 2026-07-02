@@ -202,3 +202,36 @@ async def backtest_strategy_pnl(
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/strategies")
+async def get_strategies():
+    """取得所有可用的回測策略列表"""
+    from app.services.backtest_strategies import get_strategy_list
+    return {"strategies": get_strategy_list()}
+
+
+@router.get("/strategy/{stock_id}/{strategy_id}")
+async def run_strategy_backtest(stock_id: str, strategy_id: str, days: int = Query(default=365, ge=60, le=730)):
+    """對單支股票執行特定策略回測"""
+    from app.services.backtest_strategies import run_backtest
+    try:
+        result = run_backtest(stock_id, strategy_id, days)
+        if "error" in result:
+            raise HTTPException(status_code=400, detail=result["error"])
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/strategy-all/{stock_id}")
+async def run_all_strategies_backtest(stock_id: str, days: int = Query(default=365, ge=60, le=730)):
+    """對單支股票跑所有 16 種策略的回測摘要"""
+    from app.services.backtest_strategies import run_all_strategies
+    try:
+        results = run_all_strategies(stock_id, days)
+        return {"stock_id": stock_id, "days": days, "strategies": results}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))

@@ -36,6 +36,7 @@ def screen_strong_stocks(top_n: int = 5, industry: str = "") -> list[dict]:
     if cache_key in _screener_cache:
         entry = _screener_cache[cache_key]
         if time.time() - entry["time"] < CACHE_TTL:
+            print(f"[篩選] 使用快取: {cache_key}")
             return entry["data"]
 
     # 取得股票清單
@@ -48,26 +49,47 @@ def screen_strong_stocks(top_n: int = 5, industry: str = "") -> list[dict]:
                 stocks = [{"id": s["id"], "name": s["name"]} for s in cat["stocks"]]
                 break
     else:
-        # 全市場 — 取前 200 支成交量大的股票（避免太多 API 呼叫）
+        # 全市場 — 取前 100 支股票
         all_stocks = fetch_all_stocks()
-        # 只取四位數代碼的一般股票
-        stocks = [s for s in all_stocks if len(s["id"]) == 4 and s["id"].isdigit()][:100]
+        print(f"[篩選 DEBUG] fetch_all_stocks type={type(all_stocks).__name__}, len={len(all_stocks) if all_stocks else 0}")
+        # all_stocks 是 {stock_id: stock_name} dict，轉為 list of dict
+        if isinstance(all_stocks, dict):
+            stocks = [
+                {"id": sid, "name": sname}
+                for sid, sname in all_stocks.items()
+                if len(sid) == 4 and sid.isdigit()
+            ][:100]
+        elif isinstance(all_stocks, list):
+            # 如果回傳是 list，可能是 [{id, name}] 或 [str]
+            stocks = []
+            for s in all_stocks:
+                if isinstance(s, dict):
+                    stocks.append({"id": s.get("id", s.get("stock_id", "")), "name": s.get("name", s.get("stock_name", ""))})
+                elif isinstance(s, str):
+                    stocks.append({"id": s, "name": s})
+            stocks = [s for s in stocks if len(s["id"]) == 4 and s["id"].isdigit()][:100]
+        else:
+            stocks = []
+        print(f"[篩選 DEBUG] stocks count={len(stocks)}, first={stocks[0] if stocks else 'EMPTY'}")
 
     if not stocks:
         return []
 
     # 逐一評分
     scored_stocks = []
-    for stock in stocks:
+    for idx, stock in enumerate(stocks):
         try:
             score_data = _score_stock(stock["id"], stock["name"])
-            if score_data and score_data["score"] >= 60:  # 只保留 60 分以上的
+            if score_data and score_data["score"] >= 40:  # 40 分以上即納入
                 scored_stocks.append(score_data)
-        except Exception:
+        except Exception as e:
+            print(f"[篩選] 評分 {stock['id']} 失敗: {type(e).__name__}: {e}")
             continue
 
-        # 限制 API 呼叫數量（避免被限流）
+        # 限制 API 呼叫數量（避免被限流和超時）
         if len(scored_stocks) >= top_n * 3:
+            break
+        if idx >= 20:
             break
 
     # 排序取前 N 名

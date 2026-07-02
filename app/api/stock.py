@@ -1,6 +1,7 @@
 """
 股票分析 API 路由
 """
+import asyncio
 from fastapi import APIRouter, HTTPException, Query
 from app.services.data_fetcher import (
     fetch_stock_price,
@@ -29,11 +30,11 @@ async def get_stock_analysis(
     取得個股完整分析資料，包含 OHLCV + 技術指標 + Volume Profile
     """
     try:
-        df = fetch_stock_price(stock_id, days=days)
+        df = await asyncio.to_thread(fetch_stock_price, stock_id, days)
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
 
-    indicators = calculate_all_indicators(df)
+    indicators = await asyncio.to_thread(calculate_all_indicators, df)
 
     # 最新一筆收盤資訊
     latest = df.iloc[-1]
@@ -372,3 +373,60 @@ async def get_trendline(stock_id: str):
         return {"stock_id": stock_id, **result}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/sector-flow")
+async def get_sector_flow(days: int = Query(default=5, ge=1, le=30)):
+    """
+    取得產業板塊資金流向分析
+    包含各板塊的法人資金流入/流出、漲潮/退潮狀態
+    """
+    from app.services.sector_flow import fetch_sector_flow
+    try:
+        result = fetch_sector_flow(days=days)
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/filter/conditions")
+async def get_filter_conditions():
+    """取得所有可用的篩選條件列表"""
+    from app.services.stock_filter import get_available_conditions
+    return {"conditions": get_available_conditions()}
+
+
+@router.post("/filter")
+async def filter_stocks_api(body: dict):
+    """
+    條件式篩選股票
+
+    Body: {"conditions": ["above_ma20", "macd_bull", "vol_surge"], "max_results": 30}
+    """
+    from app.services.stock_filter import filter_stocks
+    conditions = body.get("conditions", [])
+    max_results = body.get("max_results", 30)
+
+    if not conditions:
+        raise HTTPException(status_code=400, detail="請至少選擇一個篩選條件")
+
+    try:
+        result = filter_stocks(conditions=conditions, max_results=max_results)
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/cache/stats")
+async def get_cache_stats():
+    """取得快取統計（debug 用）"""
+    from app.services.cache_db import cache_stats
+    return cache_stats()
+
+
+@router.post("/cache/clear")
+async def clear_cache():
+    """清除所有快取"""
+    from app.services.cache_db import cache_clear_all
+    cache_clear_all()
+    return {"message": "快取已清除"}
