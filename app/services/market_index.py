@@ -1,9 +1,9 @@
 """
 大盤指標服務 — 台指期 + 美股三大指數
-使用 yfinance 取得最新報價
+使用 Yahoo Finance REST API（不依賴 yfinance 套件，避免雲端被擋）
 """
 import time
-import yfinance as yf
+import requests
 
 # 快取（60 秒）
 _market_cache: dict[str, dict] = {}
@@ -36,31 +36,14 @@ def fetch_market_indices() -> list:
 
     for key, info in MARKET_SYMBOLS.items():
         try:
-            ticker = yf.Ticker(info["symbol"])
-            # 取得最新報價
-            fast_info = ticker.fast_info
-
-            price = float(fast_info.get("lastPrice", 0) or fast_info.get("last_price", 0))
-            prev_close = float(fast_info.get("previousClose", 0) or fast_info.get("previous_close", 0))
-
-            if price == 0:
-                # 備用：從 history 取
-                hist = ticker.history(period="2d")
-                if not hist.empty:
-                    price = float(hist["Close"].iloc[-1])
-                    if len(hist) > 1:
-                        prev_close = float(hist["Close"].iloc[-2])
-
-            change = round(price - prev_close, 2) if prev_close > 0 else 0
-            change_pct = round(change / prev_close * 100, 2) if prev_close > 0 else 0
-
+            data = _fetch_quote_direct(info["symbol"])
             results.append({
                 "key": key,
                 "name": info["display"],
                 "full_name": info["name"],
-                "price": round(price, 2),
-                "change": change,
-                "change_pct": change_pct,
+                "price": data.get("price", 0),
+                "change": data.get("change", 0),
+                "change_pct": data.get("change_pct", 0),
             })
         except Exception as e:
             results.append({
@@ -70,8 +53,50 @@ def fetch_market_indices() -> list:
                 "price": 0,
                 "change": 0,
                 "change_pct": 0,
-                "error": str(e),
             })
 
     _market_cache[cache_key] = {"data": results, "time": time.time()}
     return results
+
+
+def _fetch_quote_direct(symbol: str) -> dict:
+    """
+    直接用 Yahoo Finance v8 chart API 取報價
+    不依賴 yfinance 套件，避免雲端 IP 被封鎖
+    """
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+    }
+
+    try:
+        url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?interval=1d&range=2d"
+        response = requests.get(url, headers=headers, timeout=10)
+
+        if response.status_code != 200:
+            return {"price": 0, "change": 0, "change_pct": 0}
+
+        data = response.json()
+        chart = data.get("chart", {}).get("result", [])
+        if not chart:
+            return {"price": 0, "change": 0, "change_pct": 0}
+
+        meta = chart[0].get("meta", {})
+        price = float(meta.get("regularMarketPrice", 0))
+        prev_close = float(
+            meta.get("chartPreviousClose", 0) or meta.get("previousClose", 0)
+        )
+
+        if price == 0:
+            return {"price": 0, "change": 0, "change_pct": 0}
+
+        change = round(price - prev_close, 2) if prev_close > 0 else 0
+        change_pct = round(change / prev_close * 100, 2) if prev_close > 0 else 0
+
+        return {
+            "price": round(price, 2),
+            "change": change,
+            "change_pct": change_pct,
+        }
+
+    except Exception:
+        return {"price": 0, "change": 0, "change_pct": 0}
