@@ -39,14 +39,14 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         print(f"[啟動] 富果 WebSocket 啟動失敗（將使用 fallback）: {e}")
 
-    # 背景預計算熱門股票資料
+    # 背景預計算熱門股票資料（延遲 30 秒再啟動，避免搶佔 API）
     try:
-        from app.services.precompute import start_precompute, schedule_daily_precompute
-        start_precompute()
+        from app.services.precompute import schedule_daily_precompute
+        # 只啟動每日排程，不在啟動時立即預計算（避免 FinMind 限流）
         schedule_daily_precompute()
-        print("[啟動] 背景預計算已啟動")
+        print("[啟動] 每日預計算排程已設定（15:00 自動更新）")
     except Exception as e:
-        print(f"[啟動] 預計算啟動失敗: {e}")
+        print(f"[啟動] 預計算排程設定失敗: {e}")
 
     # 啟動 Discord Bot（在背景 asyncio task）
     bot_task = None

@@ -99,7 +99,7 @@ def _finmind_request(params: dict, max_retries: int = 2) -> dict:
 
     for attempt in range(max_retries + 1):
         try:
-            response = requests.get(FINMIND_API_URL, params=params, timeout=15)
+            response = requests.get(FINMIND_API_URL, params=params, timeout=10)
             data = response.json()
 
             # 如果觸發限流，等一下重試
