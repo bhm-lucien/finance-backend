@@ -124,8 +124,9 @@ async def help_command(interaction: discord.Interaction):
         name="指令列表",
         value=(
             "`/stock 2330` — 查詢個股 AI 操盤建議\n"
-            "`/strong` — 今日強勢股篩選\n"
-            "`/market` — 美股 + 台指期最新資訊\n"
+            "`/top` — 今日全市場強勢股 TOP 5\n"
+            "`/strong_industry 半導體` — 特定產業強勢股\n"
+            "`/market` — 美股 + 台指期 + 費半前三\n"
             "`/help` — 顯示此說明"
         ),
         inline=False,
@@ -139,7 +140,7 @@ async def help_command(interaction: discord.Interaction):
         ),
         inline=False,
     )
-    embed.set_footer(text="ECF-AI SYSTEM v0.1.0")
+    embed.set_footer(text="ECF-AI SYSTEM v0.2.0")
     await interaction.response.send_message(embed=embed)
 
 
