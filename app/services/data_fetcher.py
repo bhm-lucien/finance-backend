@@ -195,6 +195,7 @@ def fetch_stock_price(stock_id: str, days: int = 120) -> pd.DataFrame:
 def fetch_institutional_investors(stock_id: str, days: int = 30) -> pd.DataFrame:
     """
     從 FinMind 取得三大法人買賣超資料（有快取 + 本地備份）
+    若 FinMind 失敗，fallback 到 TWSE 開放資料
     """
     cache_key = f"inst_{stock_id}_{days}"
     cached = _get_cache(cache_key)
@@ -217,9 +218,20 @@ def fetch_institutional_investors(stock_id: str, days: int = 30) -> pd.DataFrame
         if backup:
             raw_data = backup
         else:
-            result = pd.DataFrame()
-            _set_cache(cache_key, result)
-            return result
+            # Fallback: TWSE 法人買賣超
+            try:
+                twse_data = _fetch_institutional_from_twse(stock_id, days)
+                if twse_data:
+                    raw_data = twse_data
+                    print(f"[資料] {stock_id} 法人資料使用 TWSE fallback（{len(twse_data)} 筆）")
+                else:
+                    result = pd.DataFrame()
+                    _set_cache(cache_key, result)
+                    return result
+            except Exception:
+                result = pd.DataFrame()
+                _set_cache(cache_key, result)
+                return result
     else:
         _save_backup(cache_key, raw_data)
 
@@ -233,6 +245,7 @@ def fetch_institutional_investors(stock_id: str, days: int = 30) -> pd.DataFrame
 def fetch_margin_trading(stock_id: str, days: int = 30) -> pd.DataFrame:
     """
     從 FinMind 取得融資融券資料（有快取 + 本地備份）
+    若 FinMind 失敗，fallback 到 TWSE 開放資料
     """
     cache_key = f"margin_{stock_id}_{days}"
     cached = _get_cache(cache_key)
@@ -255,9 +268,20 @@ def fetch_margin_trading(stock_id: str, days: int = 30) -> pd.DataFrame:
         if backup:
             raw_data = backup
         else:
-            result = pd.DataFrame()
-            _set_cache(cache_key, result)
-            return result
+            # Fallback: TWSE 融資融券
+            try:
+                twse_data = _fetch_margin_from_twse(stock_id, days)
+                if twse_data:
+                    raw_data = twse_data
+                    print(f"[資料] {stock_id} 融資融券使用 TWSE fallback（{len(twse_data)} 筆）")
+                else:
+                    result = pd.DataFrame()
+                    _set_cache(cache_key, result)
+                    return result
+            except Exception:
+                result = pd.DataFrame()
+                _set_cache(cache_key, result)
+                return result
     else:
         _save_backup(cache_key, raw_data)
 
@@ -369,3 +393,191 @@ def _fetch_from_twse(stock_id: str, days: int = 120) -> list | None:
         _save_backup(cache_key, unique_data)
 
     return unique_data
+
+
+def _fetch_institutional_from_twse(stock_id: str, days: int = 30) -> list | None:
+    """
+    從 TWSE 取得三大法人買賣超（T86 報表）
+    TWSE 一次回傳全市場當日資料，需從中篩選目標股票
+
+    Returns:
+        list of dict（與 FinMind 格式相容）或 None
+    """
+    import requests as req
+
+    all_data = []
+    now = datetime.now()
+
+    # 取最近幾個交易日的資料（最多取 days 天，但 TWSE 每次只能查一天）
+    # 為了效率只取最近 10 個交易日
+    fetch_days = min(days, 10)
+
+    for i in range(fetch_days):
+        target_date = now - timedelta(days=i)
+        # 跳過週末
+        if target_date.weekday() >= 5:
+            continue
+
+        date_str = target_date.strftime("%Y%m%d")
+
+        try:
+            url = f"https://www.twse.com.tw/fund/T86?response=json&date={date_str}&selectType=ALL"
+            headers = {"User-Agent": "Mozilla/5.0"}
+            resp = req.get(url, headers=headers, timeout=10)
+
+            if resp.status_code != 200:
+                continue
+
+            result = resp.json()
+            if result.get("stat") != "OK" or not result.get("data"):
+                continue
+
+            # 找到目標股票
+            for row in result["data"]:
+                sid = row[0].strip()
+                if sid != stock_id:
+                    continue
+
+                try:
+                    # T86 欄位：證券代號, 證券名稱, 外陸資買進股數(不含外資自營商), 外陸資賣出股數, ...
+                    # 買進/賣出是「股數」
+                    foreign_buy = int(row[2].replace(",", ""))
+                    foreign_sell = int(row[3].replace(",", ""))
+                    trust_buy = int(row[8].replace(",", "")) if len(row) > 8 else 0
+                    trust_sell = int(row[9].replace(",", "")) if len(row) > 9 else 0
+                    dealer_buy = int(row[12].replace(",", "")) if len(row) > 12 else 0
+                    dealer_sell = int(row[13].replace(",", "")) if len(row) > 13 else 0
+
+                    date_val = target_date.strftime("%Y-%m-%d")
+
+                    # 外資
+                    all_data.append({
+                        "date": date_val,
+                        "stock_id": stock_id,
+                        "name": "Foreign_Investor",
+                        "buy": foreign_buy // 1000,   # 股轉張
+                        "sell": foreign_sell // 1000,
+                    })
+                    # 投信
+                    all_data.append({
+                        "date": date_val,
+                        "stock_id": stock_id,
+                        "name": "Investment_Trust",
+                        "buy": trust_buy // 1000,
+                        "sell": trust_sell // 1000,
+                    })
+                    # 自營商
+                    all_data.append({
+                        "date": date_val,
+                        "stock_id": stock_id,
+                        "name": "Dealer_self",
+                        "buy": dealer_buy // 1000,
+                        "sell": dealer_sell // 1000,
+                    })
+                except (ValueError, IndexError):
+                    continue
+                break  # 找到就跳出
+
+            time.sleep(3)  # TWSE 頻率限制
+
+        except Exception as e:
+            print(f"[TWSE 法人 fallback] {date_str} 失敗: {e}")
+            continue
+
+    if not all_data:
+        return None
+
+    # 修正 name 欄位以相容既有的篩選邏輯（用「外資」「投信」關鍵字）
+    for item in all_data:
+        if item["name"] == "Foreign_Investor":
+            item["name"] = "外資及陸資(不含外資自營商)"
+        elif item["name"] == "Investment_Trust":
+            item["name"] = "投信"
+        elif item["name"] == "Dealer_self":
+            item["name"] = "自營商(自行買賣)"
+
+    # 存備份
+    cache_key = f"inst_{stock_id}_{days}"
+    _save_backup(cache_key, all_data)
+
+    return all_data
+
+
+def _fetch_margin_from_twse(stock_id: str, days: int = 30) -> list | None:
+    """
+    從 TWSE 取得融資融券資料
+    使用 MI_MARGN 報表
+
+    Returns:
+        list of dict（與 FinMind 格式相容）或 None
+    """
+    import requests as req
+
+    all_data = []
+    now = datetime.now()
+
+    # 取最近幾個交易日
+    fetch_days = min(days, 10)
+
+    for i in range(fetch_days):
+        target_date = now - timedelta(days=i)
+        if target_date.weekday() >= 5:
+            continue
+
+        date_str = target_date.strftime("%Y%m%d")
+
+        try:
+            url = f"https://www.twse.com.tw/exchangeReport/MI_MARGN?response=json&date={date_str}&selectType=ALL"
+            headers = {"User-Agent": "Mozilla/5.0"}
+            resp = req.get(url, headers=headers, timeout=10)
+
+            if resp.status_code != 200:
+                continue
+
+            result = resp.json()
+            if result.get("stat") != "OK":
+                continue
+
+            # 找 data 區塊（可能是 data 或 creditList）
+            rows = result.get("data", []) or result.get("creditList", [])
+            if not rows:
+                continue
+
+            for row in rows:
+                sid = row[0].strip() if row else ""
+                if sid != stock_id:
+                    continue
+
+                try:
+                    # MI_MARGN 欄位：
+                    # 股票代號, 股票名稱, 融資買進, 融資賣出, 融資現金償還, 融資前日餘額, 融資今日餘額,
+                    # 融券買進, 融券賣出, 融券現券償還, 融券前日餘額, 融券今日餘額, ...
+                    date_val = target_date.strftime("%Y-%m-%d")
+
+                    margin_balance = int(row[6].replace(",", "")) if len(row) > 6 else 0
+                    short_balance = int(row[12].replace(",", "")) if len(row) > 12 else 0
+
+                    all_data.append({
+                        "date": date_val,
+                        "stock_id": stock_id,
+                        "MarginPurchaseTodayBalance": margin_balance,
+                        "ShortSaleTodayBalance": short_balance,
+                    })
+                except (ValueError, IndexError):
+                    continue
+                break
+
+            time.sleep(3)
+
+        except Exception as e:
+            print(f"[TWSE 融資券 fallback] {date_str} 失敗: {e}")
+            continue
+
+    if not all_data:
+        return None
+
+    # 存備份
+    cache_key = f"margin_{stock_id}_{days}"
+    _save_backup(cache_key, all_data)
+
+    return all_data
