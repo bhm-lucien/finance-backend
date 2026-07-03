@@ -42,15 +42,10 @@ async def on_ready():
     print(f"[Discord Bot] 已登入：{bot.user} (ID: {bot.user.id})")
     print(f"[Discord Bot] 已連接 {len(bot.guilds)} 個伺服器")
     print(f"[Discord Bot] 已註冊的指令: {[cmd.name for cmd in bot.tree.get_commands()]}")
-    # Guild-specific 同步（立即生效）
+    # 全域同步斜線指令（所有伺服器都能用）
     try:
-        guild = discord.Object(id=1521456332530782289)
-        bot.tree.copy_global_to(guild=guild)
-        synced = await bot.tree.sync(guild=guild)
-        print(f"[Discord Bot] 已同步 {len(synced)} 個斜線指令到伺服器")
-        # 也清除全域殘留
-        bot.tree.clear_commands(guild=None)
-        await bot.tree.sync()
+        synced = await bot.tree.sync()
+        print(f"[Discord Bot] 已全域同步 {len(synced)} 個斜線指令")
     except Exception as e:
         print(f"[Discord Bot] 指令同步失敗: {e}")
 
@@ -112,6 +107,37 @@ async def stock_command(interaction: discord.Interaction, stock_id: str):
         await interaction.followup.send(f"❌ 分析 {stock_id} 時發生錯誤：{str(e)[:200]}")
 
 
+@bot.tree.command(name="setup", description="設定目前頻道為推播頻道（管理者限定）")
+async def setup_command(interaction: discord.Interaction):
+    """設定推播頻道"""
+    # 權限檢查：只有管理者能設定
+    if not interaction.user.guild_permissions.manage_guild:
+        await interaction.response.send_message("❌ 只有伺服器管理者才能設定推播頻道", ephemeral=True)
+        return
+
+    from app.bot.guild_settings import set_push_channel
+    set_push_channel(interaction.guild_id, interaction.channel_id)
+
+    await interaction.response.send_message(
+        f"✅ 已將 **#{interaction.channel.name}** 設為推播頻道！\n"
+        f"之後的盤前報告、AI 日報、盤中掃描都會推送到這裡。",
+        ephemeral=False,
+    )
+
+
+@bot.tree.command(name="unsetup", description="取消本伺服器的推播設定（管理者限定）")
+async def unsetup_command(interaction: discord.Interaction):
+    """取消推播設定"""
+    if not interaction.user.guild_permissions.manage_guild:
+        await interaction.response.send_message("❌ 只有伺服器管理者才能操作", ephemeral=True)
+        return
+
+    from app.bot.guild_settings import remove_push_channel
+    remove_push_channel(interaction.guild_id)
+
+    await interaction.response.send_message("✅ 已取消本伺服器的推播設定", ephemeral=False)
+
+
 @bot.tree.command(name="help", description="顯示 Bot 使用說明")
 async def help_command(interaction: discord.Interaction):
     """顯示使用說明"""
@@ -127,6 +153,8 @@ async def help_command(interaction: discord.Interaction):
             "`/top` — 今日全市場強勢股 TOP 5\n"
             "`/strong_industry 半導體` — 特定產業強勢股\n"
             "`/market` — 美股 + 台指期 + 費半前三\n"
+            "`/setup` — 設定本頻道為推播頻道\n"
+            "`/unsetup` — 取消推播設定\n"
             "`/help` — 顯示此說明"
         ),
         inline=False,

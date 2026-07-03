@@ -48,11 +48,8 @@ def setup_realtime_scanner(bot):
         if hour == 9 and minute < 5:
             return
 
-        if CHANNEL_ID == 0:
-            return
-
-        channel = bot.get_channel(CHANNEL_ID)
-        if not channel:
+        channels = _get_push_channels(bot)
+        if not channels:
             return
 
         # ── 1. 飆股掃描 ──
@@ -62,7 +59,11 @@ def setup_realtime_scanner(bot):
                 if stock["stock_id"] not in _notified_today:
                     _notified_today.add(stock["stock_id"])
                     embed = _build_hot_stock_embed(stock)
-                    await channel.send(embed=embed)
+                    for channel in channels:
+                        try:
+                            await channel.send(embed=embed)
+                        except Exception:
+                            pass
                     print(f"[掃描] 飆股推播：{stock['stock_id']} {stock['name']} +{stock['change_pct']:.1f}%")
                     await asyncio.sleep(1)
         except Exception as e:
@@ -76,7 +77,11 @@ def setup_realtime_scanner(bot):
                 if sector_key not in _notified_sectors_today:
                     _notified_sectors_today.add(sector_key)
                     embed = _build_sector_alert_embed(sector)
-                    await channel.send(embed=embed)
+                    for channel in channels:
+                        try:
+                            await channel.send(embed=embed)
+                        except Exception:
+                            pass
                     print(f"[掃描] 板塊異動：{sector['name']} {sector['direction']} {sector['change_pct']:.1f}%")
                     await asyncio.sleep(1)
         except Exception as e:
@@ -90,7 +95,11 @@ def setup_realtime_scanner(bot):
                 if breakout_key not in _notified_breakout_today:
                     _notified_breakout_today.add(breakout_key)
                     embed = _build_breakout_embed(stock)
-                    await channel.send(embed=embed)
+                    for channel in channels:
+                        try:
+                            await channel.send(embed=embed)
+                        except Exception:
+                            pass
                     print(f"[掃描] 價位突破：{stock['stock_id']} {stock['name']} — {stock['breakout_type']}")
                     await asyncio.sleep(1)
         except Exception as e:
@@ -396,3 +405,26 @@ def _build_breakout_embed(stock: dict) -> discord.Embed:
     )
     embed.set_footer(text="⚠️ 價位突破僅供參考 | ECF-AI")
     return embed
+
+
+# ══════════════════════════════════════════════════════
+# Helper：取得所有推播頻道
+# ══════════════════════════════════════════════════════
+
+def _get_push_channels(bot) -> list:
+    """取得所有需要推播的頻道物件"""
+    from app.bot.guild_settings import get_all_push_channels
+
+    channel_ids = get_all_push_channels()
+
+    # 加入舊的 env 設定作為 fallback
+    if CHANNEL_ID and CHANNEL_ID not in channel_ids:
+        channel_ids.append(CHANNEL_ID)
+
+    channels = []
+    for cid in channel_ids:
+        ch = bot.get_channel(cid)
+        if ch:
+            channels.append(ch)
+
+    return channels

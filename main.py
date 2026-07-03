@@ -57,9 +57,27 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         print(f"[啟動] Discord Bot 啟動失敗（不影響 API）: {e}")
 
+    # Keep-alive：每 4 分鐘 ping 自己，防止 Railway 容器休眠
+    async def _keep_alive():
+        import os
+        import httpx
+        port = os.getenv("PORT", "8000")
+        url = f"http://localhost:{port}/health"
+        while True:
+            await asyncio.sleep(240)  # 4 分鐘
+            try:
+                async with httpx.AsyncClient() as client:
+                    await client.get(url, timeout=5)
+            except Exception:
+                pass
+
+    keep_alive_task = asyncio.create_task(_keep_alive())
+    print("[啟動] Keep-alive 機制已啟動（每 4 分鐘）")
+
     yield
 
     # 關閉時
+    keep_alive_task.cancel()
     if bot_task:
         bot_task.cancel()
     try:

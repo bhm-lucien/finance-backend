@@ -10,7 +10,7 @@ from datetime import datetime, time as dt_time
 from discord.ext import tasks
 
 
-# 推播頻道 ID
+# 推播頻道 ID（舊的單一頻道作為 fallback）
 import os
 CHANNEL_ID = int(os.getenv("DISCORD_CHANNEL_ID", "0"))
 
@@ -45,12 +45,9 @@ def setup_scheduler(bot):
 
 
 async def send_pre_market_report(bot):
-    """盤前 8:30 推播"""
-    if CHANNEL_ID == 0:
-        return
-
-    channel = bot.get_channel(CHANNEL_ID)
-    if not channel:
+    """盤前 8:30 推播（推送到所有已設定的頻道）"""
+    channels = _get_push_channels(bot)
+    if not channels:
         return
 
     try:
@@ -127,20 +124,21 @@ async def send_pre_market_report(bot):
 
         embed.set_footer(text="⚠️ 僅供參考，不構成投資建議 | ECF-AI")
 
-        await channel.send(embed=embed)
-        print(f"[排程] 盤前報告已推送 ({datetime.now().strftime('%H:%M:%S')})")
+        for channel in channels:
+            try:
+                await channel.send(embed=embed)
+            except Exception:
+                pass
+        print(f"[排程] 盤前報告已推送到 {len(channels)} 個頻道 ({datetime.now().strftime('%H:%M:%S')})")
 
     except Exception as e:
         print(f"[排程] 盤前報告推送失敗: {e}")
 
 
 async def send_daily_ai_report(bot):
-    """盤後 14:30 AI 日報推播"""
-    if CHANNEL_ID == 0:
-        return
-
-    channel = bot.get_channel(CHANNEL_ID)
-    if not channel:
+    """盤後 14:30 AI 日報推播（推送到所有已設定的頻道）"""
+    channels = _get_push_channels(bot)
+    if not channels:
         return
 
     try:
@@ -161,14 +159,17 @@ async def send_daily_ai_report(bot):
             timestamp=datetime.now(),
         )
         header.set_footer(text="ECF-AI v0.3.0 | 以下為今日完整市場分析")
-        await channel.send(embed=header)
 
-        # 逐一發送各模組 Embed
-        for embed in embeds:
-            await channel.send(embed=embed)
-            await asyncio.sleep(0.5)
+        for channel in channels:
+            try:
+                await channel.send(embed=header)
+                for embed in embeds:
+                    await channel.send(embed=embed)
+                    await asyncio.sleep(0.3)
+            except Exception:
+                pass
 
-        print(f"[排程] AI 日報已推送 ({datetime.now().strftime('%H:%M:%S')})")
+        print(f"[排程] AI 日報已推送到 {len(channels)} 個頻道 ({datetime.now().strftime('%H:%M:%S')})")
 
     except Exception as e:
         import traceback
@@ -180,3 +181,22 @@ def _weekday_name() -> str:
     """取得中文星期"""
     names = ["一", "二", "三", "四", "五", "六", "日"]
     return f"週{names[datetime.now().weekday()]}"
+
+
+def _get_push_channels(bot) -> list:
+    """取得所有需要推播的頻道物件"""
+    from app.bot.guild_settings import get_all_push_channels
+
+    channel_ids = get_all_push_channels()
+
+    # 加入舊的 env 設定作為 fallback
+    if CHANNEL_ID and CHANNEL_ID not in channel_ids:
+        channel_ids.append(CHANNEL_ID)
+
+    channels = []
+    for cid in channel_ids:
+        ch = bot.get_channel(cid)
+        if ch:
+            channels.append(ch)
+
+    return channels
