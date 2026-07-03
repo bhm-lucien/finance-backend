@@ -107,8 +107,8 @@ async def stock_command(interaction: discord.Interaction, stock_id: str):
         await interaction.followup.send(f"❌ 分析 {stock_id} 時發生錯誤：{str(e)[:200]}")
 
 
-@bot.tree.command(name="setup", description="設定目前頻道為推播頻道（管理者限定）")
-async def setup_command(interaction: discord.Interaction):
+@bot.tree.command(name="subscribe", description="訂閱推播：設定目前頻道接收即時通知（管理者限定）")
+async def subscribe_command(interaction: discord.Interaction):
     """設定推播頻道"""
     # 權限檢查：只有管理者能設定
     if not interaction.user.guild_permissions.manage_guild:
@@ -125,8 +125,8 @@ async def setup_command(interaction: discord.Interaction):
     )
 
 
-@bot.tree.command(name="unsetup", description="取消本伺服器的推播設定（管理者限定）")
-async def unsetup_command(interaction: discord.Interaction):
+@bot.tree.command(name="unsubscribe", description="取消訂閱：停止本伺服器的推播通知（管理者限定）")
+async def unsubscribe_command(interaction: discord.Interaction):
     """取消推播設定"""
     if not interaction.user.guild_permissions.manage_guild:
         await interaction.response.send_message("❌ 只有伺服器管理者才能操作", ephemeral=True)
@@ -135,7 +135,7 @@ async def unsetup_command(interaction: discord.Interaction):
     from app.bot.guild_settings import remove_push_channel
     remove_push_channel(interaction.guild_id)
 
-    await interaction.response.send_message("✅ 已取消本伺服器的推播設定", ephemeral=False)
+    await interaction.response.send_message("✅ 已取消本伺服器的推播訂閱", ephemeral=False)
 
 
 @bot.tree.command(name="help", description="顯示 Bot 使用說明")
@@ -153,8 +153,8 @@ async def help_command(interaction: discord.Interaction):
             "`/top` — 今日全市場強勢股 TOP 5\n"
             "`/strong_industry 半導體` — 特定產業強勢股\n"
             "`/market` — 美股 + 台指期 + 費半前三\n"
-            "`/setup` — 設定本頻道為推播頻道\n"
-            "`/unsetup` — 取消推播設定\n"
+            "`/subscribe` — 訂閱推播到本頻道\n"
+            "`/unsubscribe` — 取消推播訂閱\n"
             "`/help` — 顯示此說明"
         ),
         inline=False,
