@@ -510,43 +510,41 @@ async def get_portfolio_health(body: dict):
 async def get_market_heatmap():
     """
     取得即時行情熱力圖資料（Finviz Map 風格）
-    按產業分群，泡泡大小 = 成交金額，顏色 = 漲跌幅
+    按產業分群，顏色 = 漲跌幅（限制 15 檔避免過慢）
     """
     from app.services.sector_flow import fetch_sector_flow
-    from app.services.realtime import fetch_realtime_price
 
     try:
         flow = fetch_sector_flow()
         sectors = flow.get("sectors", [])
 
         heatmap_data = []
-        for sector in sectors:
-            sector_stocks = []
-            for stock in sector.get("top_stocks", [])[:10]:
-                try:
-                    rt = fetch_realtime_price(stock["id"])
-                    sector_stocks.append({
-                        "stock_id": stock["id"],
-                        "name": stock["name"],
-                        "change_pct": rt.get("change_pct", stock.get("change_pct", 0)),
-                        "price": rt.get("price", 0),
-                        "volume": rt.get("volume", 0),
-                    })
-                except Exception:
-                    sector_stocks.append({
-                        "stock_id": stock["id"],
-                        "name": stock["name"],
-                        "change_pct": stock.get("change_pct", 0),
-                        "price": 0,
-                        "volume": 0,
-                    })
+        total_stocks = 0
 
-            heatmap_data.append({
-                "sector": sector["name"],
-                "change_pct": sector["change_pct"],
-                "stocks": sector_stocks,
-                "flow_amount": sector.get("flow_amount", 0),
-            })
+        for sector in sectors:
+            if total_stocks >= 15:
+                break
+
+            sector_stocks = []
+            for stock in sector.get("top_stocks", [])[:3]:
+                if total_stocks >= 15:
+                    break
+                sector_stocks.append({
+                    "stock_id": stock["id"],
+                    "name": stock["name"],
+                    "change_pct": stock.get("change_pct", 0),
+                    "price": 0,
+                    "volume": 0,
+                })
+                total_stocks += 1
+
+            if sector_stocks:
+                heatmap_data.append({
+                    "sector": sector["name"],
+                    "change_pct": sector["change_pct"],
+                    "stocks": sector_stocks,
+                    "flow_amount": sector.get("flow_amount", 0),
+                })
 
         return {
             "sectors": heatmap_data,
