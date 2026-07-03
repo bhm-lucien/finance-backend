@@ -392,6 +392,33 @@ def _build_stock_embed(stock_id: str, name: str, price: float, change: float, ch
     return embed
 
 
+@bot.tree.command(name="test_push", description="測試推播功能是否正常")
+async def test_push_command(interaction: discord.Interaction):
+    """手動測試推播"""
+    await interaction.response.defer(thinking=True)
+
+    channel_id = DISCORD_CHANNEL_ID
+    channel = bot.get_channel(channel_id)
+
+    if not channel:
+        await interaction.followup.send(f"❌ 找不到頻道 ID: {channel_id}")
+        return
+
+    from datetime import datetime
+    embed = discord.Embed(
+        title="🧪 推播測試成功！",
+        description="如果你看到這則訊息，代表定時推播功能正常運作。",
+        color=0x00D4FF,
+        timestamp=datetime.now(),
+    )
+    embed.add_field(name="頻道", value=f"#{channel.name}", inline=True)
+    embed.add_field(name="頻道 ID", value=str(channel_id), inline=True)
+    embed.set_footer(text="ECF-AI v0.2.0")
+
+    await channel.send(embed=embed)
+    await interaction.followup.send(f"✅ 已成功推播到 #{channel.name}！")
+
+
 async def start_bot():
     """啟動 Discord Bot（在背景執行）"""
     if not DISCORD_TOKEN:
