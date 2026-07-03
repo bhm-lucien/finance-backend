@@ -368,7 +368,7 @@ def _fetch_from_twse(stock_id: str, days: int = 120) -> list | None:
                     continue
 
             # TWSE 有頻率限制，每次請求間隔 3 秒
-            time.sleep(3)
+            time.sleep(1.5)
 
         except Exception as e:
             print(f"[TWSE fallback] 取得 {stock_id} {date_str} 失敗: {e}")
@@ -478,7 +478,7 @@ def _fetch_institutional_from_twse(stock_id: str, days: int = 30) -> list | None
                     continue
                 break  # 找到就跳出
 
-            time.sleep(3)  # TWSE 頻率限制
+            time.sleep(1.5)  # TWSE 頻率限制
 
         except Exception as e:
             print(f"[TWSE 法人 fallback] {date_str} 失敗: {e}")
@@ -567,7 +567,7 @@ def _fetch_margin_from_twse(stock_id: str, days: int = 30) -> list | None:
                     continue
                 break
 
-            time.sleep(3)
+            time.sleep(1.5)
 
         except Exception as e:
             print(f"[TWSE 融資券 fallback] {date_str} 失敗: {e}")
