@@ -40,12 +40,12 @@ def setup_realtime_scanner(bot):
             _notified_breakout_today = set()
             _last_reset_date = today_str
 
-        # 只在盤中時間掃描（9:05~13:25）
+        # 只在盤中時間掃描（9:05~13:30）
         hour = now.hour
         minute = now.minute
-        if not (9 <= hour < 13 or (hour == 13 and minute <= 25)):
+        if hour < 9 or (hour == 9 and minute < 5):
             return
-        if hour == 9 and minute < 5:
+        if hour > 13 or (hour == 13 and minute >= 30):
             return
 
         channels = _get_push_channels(bot)
