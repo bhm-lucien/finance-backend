@@ -13,3 +13,4 @@ yfinance==0.2.40
 feedparser==6.0.11
 fugle-marketdata==2.4.1
 websockets==13.1
+openai==1.82.0

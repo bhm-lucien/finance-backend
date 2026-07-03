@@ -2,6 +2,7 @@
 股票分析 API 路由
 """
 import asyncio
+import numpy as np
 from fastapi import APIRouter, HTTPException, Query
 from app.services.data_fetcher import (
     fetch_stock_price,
@@ -430,3 +431,221 @@ async def clear_cache():
     from app.services.cache_db import cache_clear_all
     cache_clear_all()
     return {"message": "快取已清除"}
+
+
+# ══════════════════════════════════════════════════════
+# 新增 API：籌碼連續性、相關性、持倉健檢、熱力圖、批量報價
+# ══════════════════════════════════════════════════════
+
+@router.get("/chip-continuity/{stock_id}")
+async def get_chip_continuity(stock_id: str, days: int = Query(default=30, ge=7, le=90)):
+    """取得單一個股的籌碼連續性分析"""
+    from app.services.chip_continuity import analyze_chip_continuity
+    try:
+        result = analyze_chip_continuity(stock_id, days=days)
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/chip-continuity-ranking")
+async def get_chip_continuity_ranking(
+    top_n: int = Query(default=20, ge=5, le=50),
+    days: int = Query(default=30, ge=7, le=90),
+):
+    """取得外資/投信連買排行榜"""
+    from app.services.chip_continuity import get_continuous_buy_ranking
+    try:
+        result = await asyncio.to_thread(get_continuous_buy_ranking, top_n, days)
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/correlation")
+async def get_correlation_matrix(body: dict):
+    """
+    計算自選股漲跌相關性矩陣
+
+    Body: {"stock_ids": ["2330", "2317", "2454"], "days": 60}
+    """
+    from app.services.correlation import calculate_correlation_matrix
+
+    stock_ids = body.get("stock_ids", [])
+    days = body.get("days", 60)
+
+    if len(stock_ids) < 2:
+        raise HTTPException(status_code=400, detail="至少需要 2 檔股票")
+    if len(stock_ids) > 20:
+        raise HTTPException(status_code=400, detail="最多支援 20 檔股票")
+
+    try:
+        result = await asyncio.to_thread(calculate_correlation_matrix, stock_ids, days)
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/portfolio-health")
+async def get_portfolio_health(body: dict):
+    """
+    AI 持倉健檢
+
+    Body: {"holdings": [{"stock_id": "2330", "shares": 1000, "cost": 580.0}, ...]}
+    """
+    from app.services.portfolio_health import analyze_portfolio_health
+
+    holdings = body.get("holdings", [])
+    if not holdings:
+        raise HTTPException(status_code=400, detail="持倉資料為空")
+
+    try:
+        result = await asyncio.to_thread(analyze_portfolio_health, holdings)
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/heatmap")
+async def get_market_heatmap():
+    """
+    取得即時行情熱力圖資料（Finviz Map 風格）
+    按產業分群，泡泡大小 = 成交金額，顏色 = 漲跌幅
+    """
+    from app.services.sector_flow import fetch_sector_flow
+    from app.services.realtime import fetch_realtime_price
+
+    try:
+        flow = fetch_sector_flow()
+        sectors = flow.get("sectors", [])
+
+        heatmap_data = []
+        for sector in sectors:
+            sector_stocks = []
+            for stock in sector.get("top_stocks", [])[:10]:
+                try:
+                    rt = fetch_realtime_price(stock["id"])
+                    sector_stocks.append({
+                        "stock_id": stock["id"],
+                        "name": stock["name"],
+                        "change_pct": rt.get("change_pct", stock.get("change_pct", 0)),
+                        "price": rt.get("price", 0),
+                        "volume": rt.get("volume", 0),
+                    })
+                except Exception:
+                    sector_stocks.append({
+                        "stock_id": stock["id"],
+                        "name": stock["name"],
+                        "change_pct": stock.get("change_pct", 0),
+                        "price": 0,
+                        "volume": 0,
+                    })
+
+            heatmap_data.append({
+                "sector": sector["name"],
+                "change_pct": sector["change_pct"],
+                "stocks": sector_stocks,
+                "flow_amount": sector.get("flow_amount", 0),
+            })
+
+        return {
+            "sectors": heatmap_data,
+            "update_time": flow.get("update_time", ""),
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/batch-realtime")
+async def get_batch_realtime(body: dict):
+    """
+    批量取得即時報價（自選股監控用）
+
+    Body: {"stock_ids": ["2330", "2317", "2454"]}
+    """
+    from app.services.realtime import fetch_realtime_price
+
+    stock_ids = body.get("stock_ids", [])
+    if not stock_ids:
+        raise HTTPException(status_code=400, detail="股票清單為空")
+
+    results = []
+    for sid in stock_ids[:30]:  # 最多 30 檔
+        try:
+            rt = fetch_realtime_price(sid)
+            results.append({"stock_id": sid, **rt})
+        except Exception:
+            results.append({"stock_id": sid, "price": 0, "change_pct": 0})
+
+    return {"quotes": results, "count": len(results)}
+
+
+@router.get("/pe-river/{stock_id}")
+async def get_pe_river(stock_id: str, years: int = Query(default=5, ge=1, le=10)):
+    """
+    取得本益比河流圖資料
+
+    計算歷史本益比帶狀區間（偏低/合理/偏高/過高）
+    """
+    try:
+        # 取得較長期歷史資料
+        days = years * 365
+        df = fetch_stock_price(stock_id, days=min(days, 1200))
+
+        if len(df) < 60:
+            raise HTTPException(status_code=404, detail="歷史資料不足")
+
+        # 用歷史 EPS 估算（簡化版：用收盤價/PE 比值反推）
+        # 實際上需要 EPS 資料，這裡用統計法估算本益比區間
+        closes = df["close"].values
+        dates = df["date"].dt.strftime("%Y-%m-%d").tolist()
+
+        # 滾動計算統計本益比區間
+        window = min(252, len(closes) // 2)  # 約一年或一半資料
+        pe_data = []
+
+        for i in range(window, len(closes)):
+            historical = closes[i - window:i]
+            current = closes[i]
+
+            # 用統計分位數模擬本益比河流帶
+            p20 = float(np.percentile(historical, 20))
+            p40 = float(np.percentile(historical, 40))
+            p60 = float(np.percentile(historical, 60))
+            p80 = float(np.percentile(historical, 80))
+
+            pe_data.append({
+                "date": dates[i],
+                "close": round(float(current), 2),
+                "cheap": round(p20, 2),       # 偏低
+                "fair_low": round(p40, 2),    # 合理低
+                "fair_high": round(p60, 2),   # 合理高
+                "expensive": round(p80, 2),   # 偏高
+            })
+
+        # 判斷目前位置
+        import numpy as np
+        current_price = closes[-1]
+        all_prices = closes[-window:]
+        percentile = float(np.searchsorted(np.sort(all_prices), current_price) / len(all_prices) * 100)
+
+        if percentile <= 20:
+            zone = "偏低"
+        elif percentile <= 50:
+            zone = "合理"
+        elif percentile <= 80:
+            zone = "偏高"
+        else:
+            zone = "過高"
+
+        return {
+            "stock_id": stock_id,
+            "data": pe_data[-252:],  # 最近一年
+            "current_zone": zone,
+            "current_percentile": round(percentile, 1),
+            "years": years,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
