@@ -127,6 +127,7 @@ def _finmind_request(params: dict, max_retries: int = 2) -> dict:
 def fetch_stock_price(stock_id: str, days: int = 120) -> pd.DataFrame:
     """
     從 FinMind 取得歷史股價資料（有快取 + 本地備份）
+    若 FinMind 失敗，自動 fallback 到 TWSE 開放資料
     """
     cache_key = f"price_{stock_id}_{days}"
     cached = _get_cache(cache_key)
@@ -145,13 +146,25 @@ def fetch_stock_price(stock_id: str, days: int = 120) -> pd.DataFrame:
 
     raw_data = data.get("data", [])
 
-    # 如果 API 失敗，嘗試用本地備份
+    # 如果 FinMind API 失敗，嘗試 TWSE fallback
     if data.get("status") != 200 or not raw_data:
+        # 先嘗試本地備份
         backup = _load_backup(cache_key)
         if backup:
             raw_data = backup
         else:
-            raise ValueError(f"無法取得股票 {stock_id} 的資料：{data.get('msg', '未知錯誤')}（無本地備份）")
+            # Fallback: TWSE 開放資料
+            try:
+                twse_data = _fetch_from_twse(stock_id, days)
+                if twse_data:
+                    raw_data = twse_data
+                    print(f"[資料] {stock_id} 使用 TWSE fallback（{len(twse_data)} 筆）")
+                else:
+                    raise ValueError(f"無法取得股票 {stock_id} 的資料：FinMind 限流且 TWSE 無資料")
+            except ValueError:
+                raise
+            except Exception as e:
+                raise ValueError(f"無法取得股票 {stock_id} 的資料：{data.get('msg', '未知錯誤')}（TWSE fallback 也失敗：{e}）")
     else:
         # 成功時存備份
         _save_backup(cache_key, raw_data)
@@ -254,3 +267,105 @@ def fetch_margin_trading(stock_id: str, days: int = 30) -> pd.DataFrame:
     _set_cache(cache_key, df)
     return df
 
+
+
+# ── TWSE 開放資料 Fallback ─────────────────────────────
+
+def _fetch_from_twse(stock_id: str, days: int = 120) -> list | None:
+    """
+    從 TWSE 開放資料取得歷史股價（作為 FinMind 的 fallback）
+    TWSE API 一次回傳一個月的資料，需要逐月取得
+
+    Returns:
+        list of dict（與 FinMind 格式相容）或 None
+    """
+    import requests as req
+    from datetime import datetime, timedelta
+
+    all_data = []
+    now = datetime.now()
+    months_needed = max(1, days // 30 + 1)
+
+    for i in range(months_needed):
+        target_date = now - timedelta(days=30 * i)
+        date_str = target_date.strftime("%Y%m%d")
+
+        try:
+            url = f"https://www.twse.com.tw/exchangeReport/STOCK_DAY?response=json&date={date_str}&stockNo={stock_id}"
+            headers = {"User-Agent": "Mozilla/5.0"}
+            resp = req.get(url, headers=headers, timeout=10)
+
+            if resp.status_code != 200:
+                continue
+
+            result = resp.json()
+            if result.get("stat") != "OK" or not result.get("data"):
+                continue
+
+            # 解析 TWSE 資料格式
+            for row in result["data"]:
+                try:
+                    # TWSE 欄位：日期, 成交股數, 成交金額, 開盤價, 最高價, 最低價, 收盤價, 漲跌價差, 成交筆數
+                    date_parts = row[0].strip().split("/")
+                    # 民國年轉西元年
+                    year = int(date_parts[0]) + 1911
+                    month = int(date_parts[1])
+                    day = int(date_parts[2])
+                    date_val = f"{year}-{month:02d}-{day:02d}"
+
+                    volume = int(row[1].replace(",", ""))
+                    amount = int(row[2].replace(",", "")) if row[2].replace(",", "").isdigit() else 0
+                    open_price = float(row[3].replace(",", "")) if row[3].replace(",", "").replace(".", "").isdigit() else 0
+                    high_price = float(row[4].replace(",", "")) if row[4].replace(",", "").replace(".", "").isdigit() else 0
+                    low_price = float(row[5].replace(",", "")) if row[5].replace(",", "").replace(".", "").isdigit() else 0
+                    close_price = float(row[6].replace(",", "")) if row[6].replace(",", "").replace(".", "").isdigit() else 0
+
+                    # 漲跌價差
+                    spread_str = row[7].replace(",", "").replace("+", "").replace("X", "0").replace(" ", "")
+                    try:
+                        spread = float(spread_str) if spread_str else 0
+                    except (ValueError, TypeError):
+                        spread = 0
+
+                    if close_price > 0:
+                        all_data.append({
+                            "date": date_val,
+                            "stock_id": stock_id,
+                            "Trading_Volume": volume,
+                            "Trading_money": amount,
+                            "open": open_price,
+                            "max": high_price,
+                            "min": low_price,
+                            "close": close_price,
+                            "spread": spread,
+                            "Trading_turnover": 0,
+                        })
+                except (ValueError, IndexError):
+                    continue
+
+            # TWSE 有頻率限制，每次請求間隔 3 秒
+            time.sleep(3)
+
+        except Exception as e:
+            print(f"[TWSE fallback] 取得 {stock_id} {date_str} 失敗: {e}")
+            continue
+
+    if not all_data:
+        return None
+
+    # 去重複並排序
+    seen_dates = set()
+    unique_data = []
+    for item in all_data:
+        if item["date"] not in seen_dates:
+            seen_dates.add(item["date"])
+            unique_data.append(item)
+
+    unique_data.sort(key=lambda x: x["date"])
+
+    # 存入備份
+    if unique_data:
+        cache_key = f"price_{stock_id}_{days}"
+        _save_backup(cache_key, unique_data)
+
+    return unique_data
