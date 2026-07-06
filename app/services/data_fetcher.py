@@ -295,114 +295,124 @@ def fetch_margin_trading(stock_id: str, days: int = 30) -> pd.DataFrame:
 
 # ── TWSE 開放資料 Fallback ─────────────────────────────
 
+import threading
+_twse_lock = threading.Lock()  # 並發鎖，同時只允許一個 TWSE 請求
+
+
 def _fetch_from_twse(stock_id: str, days: int = 120) -> list | None:
     """
     從 TWSE 開放資料取得歷史股價（作為 FinMind 的 fallback）
     TWSE API 一次回傳一個月的資料，需要逐月取得
+    加入並發鎖避免多個請求同時呼叫 TWSE 造成容器卡死
 
     Returns:
         list of dict（與 FinMind 格式相容）或 None
     """
+    # 並發限制：如果已有其他請求在用 TWSE，直接放棄
+    if not _twse_lock.acquire(blocking=False):
+        print(f"[TWSE fallback] {stock_id} 跳過（已有其他請求進行中）")
+        return None
     import requests as req
     from datetime import datetime, timedelta
 
     all_data = []
     now = datetime.now()
-    months_needed = max(1, days // 30 + 1)
+    months_needed = min(3, max(1, days // 30 + 1))  # 最多取 3 個月，避免太慢
 
-    for i in range(months_needed):
-        target_date = now - timedelta(days=30 * i)
-        date_str = target_date.strftime("%Y%m%d")
+    try:
+        for i in range(months_needed):
+            target_date = now - timedelta(days=30 * i)
+            date_str = target_date.strftime("%Y%m%d")
 
-        try:
-            url = f"https://www.twse.com.tw/exchangeReport/STOCK_DAY?response=json&date={date_str}&stockNo={stock_id}"
-            headers = {"User-Agent": "Mozilla/5.0"}
-            resp = req.get(url, headers=headers, timeout=10)
+            try:
+                url = f"https://www.twse.com.tw/exchangeReport/STOCK_DAY?response=json&date={date_str}&stockNo={stock_id}"
+                headers = {"User-Agent": "Mozilla/5.0"}
+                resp = req.get(url, headers=headers, timeout=10)
 
-            if resp.status_code != 200:
-                continue
-
-            result = resp.json()
-            if result.get("stat") != "OK" or not result.get("data"):
-                continue
-
-            # 解析 TWSE 資料格式
-            for row in result["data"]:
-                try:
-                    # TWSE 欄位：日期, 成交股數, 成交金額, 開盤價, 最高價, 最低價, 收盤價, 漲跌價差, 成交筆數
-                    date_parts = row[0].strip().split("/")
-                    # 民國年轉西元年
-                    year = int(date_parts[0]) + 1911
-                    month = int(date_parts[1])
-                    day = int(date_parts[2])
-                    date_val = f"{year}-{month:02d}-{day:02d}"
-
-                    volume = int(row[1].replace(",", ""))
-                    amount = int(row[2].replace(",", "")) if row[2].replace(",", "").isdigit() else 0
-                    open_price = float(row[3].replace(",", "")) if row[3].replace(",", "").replace(".", "").isdigit() else 0
-                    high_price = float(row[4].replace(",", "")) if row[4].replace(",", "").replace(".", "").isdigit() else 0
-                    low_price = float(row[5].replace(",", "")) if row[5].replace(",", "").replace(".", "").isdigit() else 0
-                    close_price = float(row[6].replace(",", "")) if row[6].replace(",", "").replace(".", "").isdigit() else 0
-
-                    # 漲跌價差
-                    spread_str = row[7].replace(",", "").replace("+", "").replace("X", "0").replace(" ", "")
-                    try:
-                        spread = float(spread_str) if spread_str else 0
-                    except (ValueError, TypeError):
-                        spread = 0
-
-                    if close_price > 0:
-                        all_data.append({
-                            "date": date_val,
-                            "stock_id": stock_id,
-                            "Trading_Volume": volume,
-                            "Trading_money": amount,
-                            "open": open_price,
-                            "max": high_price,
-                            "min": low_price,
-                            "close": close_price,
-                            "spread": spread,
-                            "Trading_turnover": 0,
-                        })
-                except (ValueError, IndexError):
+                if resp.status_code != 200:
                     continue
 
-            # TWSE 有頻率限制，每次請求間隔 3 秒
-            time.sleep(1.5)
+                result = resp.json()
+                if result.get("stat") != "OK" or not result.get("data"):
+                    continue
 
-        except Exception as e:
-            print(f"[TWSE fallback] 取得 {stock_id} {date_str} 失敗: {e}")
-            continue
+                # 解析 TWSE 資料格式
+                for row in result["data"]:
+                    try:
+                        date_parts = row[0].strip().split("/")
+                        year = int(date_parts[0]) + 1911
+                        month = int(date_parts[1])
+                        day = int(date_parts[2])
+                        date_val = f"{year}-{month:02d}-{day:02d}"
 
-    if not all_data:
+                        volume = int(row[1].replace(",", ""))
+                        amount = int(row[2].replace(",", "")) if row[2].replace(",", "").isdigit() else 0
+                        open_price = float(row[3].replace(",", "")) if row[3].replace(",", "").replace(".", "").isdigit() else 0
+                        high_price = float(row[4].replace(",", "")) if row[4].replace(",", "").replace(".", "").isdigit() else 0
+                        low_price = float(row[5].replace(",", "")) if row[5].replace(",", "").replace(".", "").isdigit() else 0
+                        close_price = float(row[6].replace(",", "")) if row[6].replace(",", "").replace(".", "").isdigit() else 0
+
+                        spread_str = row[7].replace(",", "").replace("+", "").replace("X", "0").replace(" ", "")
+                        try:
+                            spread = float(spread_str) if spread_str else 0
+                        except (ValueError, TypeError):
+                            spread = 0
+
+                        if close_price > 0:
+                            all_data.append({
+                                "date": date_val,
+                                "stock_id": stock_id,
+                                "Trading_Volume": volume,
+                                "Trading_money": amount,
+                                "open": open_price,
+                                "max": high_price,
+                                "min": low_price,
+                                "close": close_price,
+                                "spread": spread,
+                                "Trading_turnover": 0,
+                            })
+                    except (ValueError, IndexError):
+                        continue
+
+                time.sleep(1.5)
+
+            except Exception as e:
+                print(f"[TWSE fallback] 取得 {stock_id} {date_str} 失敗: {e}")
+                continue
+
+        if not all_data:
+            return None
+
+        # 去重複並排序
+        seen_dates = set()
+        unique_data = []
+        for item in all_data:
+            if item["date"] not in seen_dates:
+                seen_dates.add(item["date"])
+                unique_data.append(item)
+
+        unique_data.sort(key=lambda x: x["date"])
+
+        # 存入備份
+        if unique_data:
+            cache_key = f"price_{stock_id}_{days}"
+            _save_backup(cache_key, unique_data)
+
+        return unique_data
+
+    except Exception as e:
+        print(f"[TWSE fallback] {stock_id} 異常: {e}")
         return None
-
-    # 去重複並排序
-    seen_dates = set()
-    unique_data = []
-    for item in all_data:
-        if item["date"] not in seen_dates:
-            seen_dates.add(item["date"])
-            unique_data.append(item)
-
-    unique_data.sort(key=lambda x: x["date"])
-
-    # 存入備份
-    if unique_data:
-        cache_key = f"price_{stock_id}_{days}"
-        _save_backup(cache_key, unique_data)
-
-    return unique_data
+    finally:
+        _twse_lock.release()
 
 
 def _fetch_institutional_from_twse(stock_id: str, days: int = 30) -> list | None:
     """
     從 TWSE 取得三大法人買賣超（T86 報表）
-    TWSE 一次回傳全市場當日資料，需從中篩選目標股票
-
-    Returns:
-        list of dict（與 FinMind 格式相容）或 None
     """
+    if not _twse_lock.acquire(blocking=False):
+        return None
     import requests as req
 
     all_data = []
@@ -485,6 +495,7 @@ def _fetch_institutional_from_twse(stock_id: str, days: int = 30) -> list | None
             continue
 
     if not all_data:
+        _twse_lock.release()
         return None
 
     # 修正 name 欄位以相容既有的篩選邏輯（用「外資」「投信」關鍵字）
@@ -500,17 +511,16 @@ def _fetch_institutional_from_twse(stock_id: str, days: int = 30) -> list | None
     cache_key = f"inst_{stock_id}_{days}"
     _save_backup(cache_key, all_data)
 
+    _twse_lock.release()
     return all_data
 
 
 def _fetch_margin_from_twse(stock_id: str, days: int = 30) -> list | None:
     """
     從 TWSE 取得融資融券資料
-    使用 MI_MARGN 報表
-
-    Returns:
-        list of dict（與 FinMind 格式相容）或 None
     """
+    if not _twse_lock.acquire(blocking=False):
+        return None
     import requests as req
 
     all_data = []
@@ -574,10 +584,12 @@ def _fetch_margin_from_twse(stock_id: str, days: int = 30) -> list | None:
             continue
 
     if not all_data:
+        _twse_lock.release()
         return None
 
     # 存備份
     cache_key = f"margin_{stock_id}_{days}"
     _save_backup(cache_key, all_data)
 
+    _twse_lock.release()
     return all_data
