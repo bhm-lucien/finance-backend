@@ -127,7 +127,7 @@ def _finmind_request(params: dict, max_retries: int = 2) -> dict:
 def fetch_stock_price(stock_id: str, days: int = 120) -> pd.DataFrame:
     """
     從 FinMind 取得歷史股價資料（有快取 + 本地備份）
-    若 FinMind 失敗，自動 fallback 到 TWSE 開放資料
+    若 FinMind 失敗，使用本地備份。TWSE fallback 改為後台預取，不阻塞 API。
     """
     cache_key = f"price_{stock_id}_{days}"
     cached = _get_cache(cache_key)
@@ -143,30 +143,18 @@ def fetch_stock_price(stock_id: str, days: int = 120) -> pd.DataFrame:
     }
 
     data = _finmind_request(params)
-
     raw_data = data.get("data", [])
 
-    # 如果 FinMind API 失敗，嘗試 TWSE fallback
     if data.get("status") != 200 or not raw_data:
-        # 先嘗試本地備份
+        # 使用本地備份（不阻塞等待 TWSE）
         backup = _load_backup(cache_key)
         if backup:
             raw_data = backup
         else:
-            # Fallback: TWSE 開放資料
-            try:
-                twse_data = _fetch_from_twse(stock_id, days)
-                if twse_data:
-                    raw_data = twse_data
-                    print(f"[資料] {stock_id} 使用 TWSE fallback（{len(twse_data)} 筆）")
-                else:
-                    raise ValueError(f"無法取得股票 {stock_id} 的資料：FinMind 限流且 TWSE 無資料")
-            except ValueError:
-                raise
-            except Exception as e:
-                raise ValueError(f"無法取得股票 {stock_id} 的資料：{data.get('msg', '未知錯誤')}（TWSE fallback 也失敗：{e}）")
+            # 觸發後台 TWSE 預取（非阻塞）
+            _schedule_twse_prefetch(stock_id, days)
+            raise ValueError(f"股票 {stock_id} 資料暫時無法取得（FinMind 限流中，背景預取已排程）")
     else:
-        # 成功時存備份
         _save_backup(cache_key, raw_data)
 
     df = pd.DataFrame(raw_data)
@@ -218,20 +206,9 @@ def fetch_institutional_investors(stock_id: str, days: int = 30) -> pd.DataFrame
         if backup:
             raw_data = backup
         else:
-            # Fallback: TWSE 法人買賣超
-            try:
-                twse_data = _fetch_institutional_from_twse(stock_id, days)
-                if twse_data:
-                    raw_data = twse_data
-                    print(f"[資料] {stock_id} 法人資料使用 TWSE fallback（{len(twse_data)} 筆）")
-                else:
-                    result = pd.DataFrame()
-                    _set_cache(cache_key, result)
-                    return result
-            except Exception:
-                result = pd.DataFrame()
-                _set_cache(cache_key, result)
-                return result
+            result = pd.DataFrame()
+            _set_cache(cache_key, result)
+            return result
     else:
         _save_backup(cache_key, raw_data)
 
@@ -245,7 +222,6 @@ def fetch_institutional_investors(stock_id: str, days: int = 30) -> pd.DataFrame
 def fetch_margin_trading(stock_id: str, days: int = 30) -> pd.DataFrame:
     """
     從 FinMind 取得融資融券資料（有快取 + 本地備份）
-    若 FinMind 失敗，fallback 到 TWSE 開放資料
     """
     cache_key = f"margin_{stock_id}_{days}"
     cached = _get_cache(cache_key)
@@ -268,20 +244,9 @@ def fetch_margin_trading(stock_id: str, days: int = 30) -> pd.DataFrame:
         if backup:
             raw_data = backup
         else:
-            # Fallback: TWSE 融資融券
-            try:
-                twse_data = _fetch_margin_from_twse(stock_id, days)
-                if twse_data:
-                    raw_data = twse_data
-                    print(f"[資料] {stock_id} 融資融券使用 TWSE fallback（{len(twse_data)} 筆）")
-                else:
-                    result = pd.DataFrame()
-                    _set_cache(cache_key, result)
-                    return result
-            except Exception:
-                result = pd.DataFrame()
-                _set_cache(cache_key, result)
-                return result
+            result = pd.DataFrame()
+            _set_cache(cache_key, result)
+            return result
     else:
         _save_backup(cache_key, raw_data)
 
@@ -292,10 +257,35 @@ def fetch_margin_trading(stock_id: str, days: int = 30) -> pd.DataFrame:
     return df
 
 
-
-# ── TWSE 開放資料 Fallback ─────────────────────────────
+# ── 後台 TWSE 預取排程 ─────────────────────────────
 
 import threading
+
+_twse_prefetch_queue: set = set()  # 待預取的股票
+
+
+def _schedule_twse_prefetch(stock_id: str, days: int):
+    """排程後台預取（非阻塞），避免重複排程"""
+    key = f"{stock_id}_{days}"
+    if key in _twse_prefetch_queue:
+        return
+    _twse_prefetch_queue.add(key)
+
+    def _do_prefetch():
+        try:
+            data = _fetch_from_twse(stock_id, days)
+            if data:
+                print(f"[TWSE 預取] {stock_id} 完成（{len(data)} 筆）")
+        except Exception as e:
+            print(f"[TWSE 預取] {stock_id} 失敗: {e}")
+        finally:
+            _twse_prefetch_queue.discard(key)
+
+    thread = threading.Thread(target=_do_prefetch, daemon=True)
+    thread.start()
+
+
+# ── TWSE 開放資料 Fallback（後台預取用）─────────────────
 _twse_lock = threading.Lock()  # 並發鎖，同時只允許一個 TWSE 請求
 
 
