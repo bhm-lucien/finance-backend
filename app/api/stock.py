@@ -586,12 +586,18 @@ async def get_pe_river(stock_id: str, years: int = Query(default=5, ge=1, le=10)
     計算歷史本益比帶狀區間（偏低/合理/偏高/過高）
     """
     try:
-        # 取得較長期歷史資料
-        days = years * 365
-        df = fetch_stock_price(stock_id, days=min(days, 1200))
+        # 取得歷史資料（先嘗試長期，失敗就取短期）
+        df = None
+        for attempt_days in [min(years * 365, 1200), 365, 120]:
+            try:
+                df = fetch_stock_price(stock_id, days=attempt_days)
+                if len(df) >= 60:
+                    break
+            except Exception:
+                continue
 
-        if len(df) < 60:
-            raise HTTPException(status_code=404, detail="歷史資料不足")
+        if df is None or len(df) < 60:
+            raise HTTPException(status_code=404, detail="歷史資料不足，請稍後再試")
 
         # 用歷史 EPS 估算（簡化版：用收盤價/PE 比值反推）
         # 實際上需要 EPS 資料，這裡用統計法估算本益比區間
@@ -622,7 +628,6 @@ async def get_pe_river(stock_id: str, years: int = Query(default=5, ge=1, le=10)
             })
 
         # 判斷目前位置
-        import numpy as np
         current_price = closes[-1]
         all_prices = closes[-window:]
         percentile = float(np.searchsorted(np.sort(all_prices), current_price) / len(all_prices) * 100)
