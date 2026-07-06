@@ -425,6 +425,21 @@ async def get_cache_stats():
     return cache_stats()
 
 
+@router.get("/report/{stock_id}")
+async def get_stock_report(stock_id: str):
+    """AI 個股研究報告（基本面分析、DCF 估值、三情境預測）"""
+    from app.services.stock_report import generate_stock_report
+    try:
+        result = await asyncio.to_thread(generate_stock_report, stock_id)
+        if result.get("error"):
+            raise HTTPException(status_code=500, detail=result["error"])
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.post("/cache/clear")
 async def clear_cache():
     """清除所有快取"""
