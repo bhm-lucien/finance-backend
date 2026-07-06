@@ -95,7 +95,7 @@ async def stock_command(interaction: discord.Interaction, stock_id: str):
             color=color,
         )
         quick_embed.add_field(name="⏳", value="AI 分析計算中，請稍候...", inline=False)
-        quick_embed.set_footer(text="ECF-AI")
+        quick_embed.set_footer(text="AI 股票助手")
 
         msg = await interaction.followup.send(embed=quick_embed, wait=True)
 
@@ -167,7 +167,7 @@ async def premarket_command(interaction: discord.Interaction):
                 stock_text += f"{i}. **{s['stock_id']} {s['name']}**（+{s['change_pct']:.1f}%）\n"
             embed.add_field(name="🔥 強勢股", value=stock_text, inline=False)
 
-        embed.set_footer(text="⚠️ 僅供參考 | ECF-AI")
+        embed.set_footer(text="⚠️ 僅供參考")
         await interaction.followup.send(embed=embed)
 
     except Exception as e:
@@ -239,7 +239,7 @@ async def help_command(interaction: discord.Interaction):
         ),
         inline=False,
     )
-    embed.set_footer(text="ECF-AI SYSTEM v0.2.0")
+    embed.set_footer(text="")
     await interaction.response.send_message(embed=embed)
 
 
@@ -271,7 +271,7 @@ async def top_command(interaction: discord.Interaction):
                 inline=False,
             )
 
-        embed.set_footer(text="⚠️ 僅供參考 | ECF-AI")
+        embed.set_footer(text="⚠️ 僅供參考")
         await interaction.followup.send(embed=embed)
 
     except Exception as e:
@@ -307,7 +307,7 @@ async def strong_industry_command(interaction: discord.Interaction, industry: st
                 inline=False,
             )
 
-        embed.set_footer(text="⚠️ 僅供參考 | ECF-AI")
+        embed.set_footer(text="⚠️ 僅供參考")
         await interaction.followup.send(embed=embed)
 
     except Exception as e:
@@ -378,7 +378,7 @@ async def market_command(interaction: discord.Interaction):
         if us_market.get("summary"):
             embed.add_field(name="📝 摘要", value=us_market["summary"], inline=False)
 
-        embed.set_footer(text=f"更新：{us_market.get('update_time', '--')} | ECF-AI")
+        embed.set_footer(text=f"更新：{us_market.get('update_time', '--')}")
         await interaction.followup.send(embed=embed)
 
     except Exception as e:
@@ -487,7 +487,7 @@ def _build_stock_embed(stock_id: str, name: str, price: float, change: float, ch
             inline=False,
         )
 
-    embed.set_footer(text="⚠️ 僅供參考，不構成投資建議 | ECF-AI")
+    embed.set_footer(text="⚠️ 僅供參考，不構成投資建議")
     return embed
 
 
@@ -512,7 +512,7 @@ async def test_push_command(interaction: discord.Interaction):
     )
     embed.add_field(name="頻道", value=f"#{channel.name}", inline=True)
     embed.add_field(name="頻道 ID", value=str(channel_id), inline=True)
-    embed.set_footer(text="ECF-AI v0.2.0")
+    embed.set_footer(text="")
 
     await channel.send(embed=embed)
     await interaction.followup.send(f"✅ 已成功推播到 #{channel.name}！")

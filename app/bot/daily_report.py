@@ -128,7 +128,7 @@ def _build_market_summary() -> tuple[discord.Embed, str]:
         if us_text:
             embed.add_field(name="🇺🇸 美股概況", value=us_text, inline=False)
 
-    embed.set_footer(text="ECF-AI 每日日報")
+    embed.set_footer(text="AI 股票助手 每日日報")
     return embed, summary_text
 
 
@@ -321,5 +321,5 @@ async def _build_ai_outlook(market_data: dict) -> discord.Embed:
         print(f"[AI 日報] OpenAI 呼叫失敗: {e}")
         embed.description = f"AI 分析生成失敗：{str(e)[:100]}"
 
-    embed.set_footer(text="⚠️ AI 生成內容僅供參考，不構成投資建議 | ECF-AI")
+    embed.set_footer(text="⚠️ AI 生成內容僅供參考，不構成投資建議")
     return embed

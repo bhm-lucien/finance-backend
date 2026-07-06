@@ -128,7 +128,7 @@ async def send_pre_market_report(bot):
                 inline=False,
             )
 
-        embed.set_footer(text="⚠️ 僅供參考，不構成投資建議 | ECF-AI")
+        embed.set_footer(text="⚠️ 僅供參考，不構成投資建議")
 
         for channel in channels:
             try:
@@ -164,7 +164,7 @@ async def send_daily_ai_report(bot):
             color=0x00D4FF,
             timestamp=datetime.now(TW_TZ),
         )
-        header.set_footer(text="ECF-AI v0.3.0 | 以下為今日完整市場分析")
+        header.set_footer(text="以下為今日完整市場分析")
 
         for channel in channels:
             try:

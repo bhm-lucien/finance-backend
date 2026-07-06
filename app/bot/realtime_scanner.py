@@ -211,7 +211,7 @@ def _build_hot_stock_embed(stock: dict) -> discord.Embed:
         value=f"使用 `/stock {stock['stock_id']}` 查看完整分析",
         inline=False,
     )
-    embed.set_footer(text="⚠️ 飆股警報僅供參考 | ECF-AI")
+    embed.set_footer(text="⚠️ 飆股警報僅供參考")
     return embed
 
 
@@ -290,7 +290,7 @@ def _build_sector_alert_embed(sector: dict) -> discord.Embed:
             stock_text = "\n".join([f"• {s['name']} {s['change_pct']:.1f}%" for s in top_stocks])
             embed.add_field(name="⚠️ 領跌個股", value=stock_text, inline=False)
 
-    embed.set_footer(text="⚠️ 板塊異動僅供參考 | ECF-AI")
+    embed.set_footer(text="⚠️ 板塊異動僅供參考")
     return embed
 
 
@@ -410,7 +410,7 @@ def _build_breakout_embed(stock: dict) -> discord.Embed:
         value=f"使用 `/stock {stock['stock_id']}` 查看完整分析",
         inline=False,
     )
-    embed.set_footer(text="⚠️ 價位突破僅供參考 | ECF-AI")
+    embed.set_footer(text="⚠️ 價位突破僅供參考")
     return embed
 
 
