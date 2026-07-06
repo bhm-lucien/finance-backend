@@ -43,6 +43,10 @@ def setup_realtime_scanner(bot):
             _notified_breakout_today = set()
             _last_reset_date = today_str
 
+        # 週末不掃描
+        if now.weekday() >= 5:
+            return
+
         # 只在盤中時間掃描（9:05~13:30）
         hour = now.hour
         minute = now.minute

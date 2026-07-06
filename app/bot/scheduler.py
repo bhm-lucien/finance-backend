@@ -31,9 +31,14 @@ def setup_scheduler(bot):
         today_str = now.strftime("%Y-%m-%d")
 
         if current_time == "08:30" and _sent_today.get("pre") != today_str:
+            # 週末不推播（週六=5, 週日=6）
+            if now.weekday() >= 5:
+                return
             _sent_today["pre"] = today_str
             await send_pre_market_report(bot)
         elif current_time == "14:30" and _sent_today.get("daily") != today_str:
+            if now.weekday() >= 5:
+                return
             _sent_today["daily"] = today_str
             await send_daily_ai_report(bot)
 
