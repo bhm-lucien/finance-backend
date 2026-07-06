@@ -149,7 +149,7 @@ def get_continuous_buy_ranking(top_n: int = 20, days: int = 30) -> dict:
 
     all_stocks = fetch_all_stocks()
     # 只掃描四碼股票
-    stock_ids = [sid for sid in all_stocks.keys() if len(sid) == 4 and sid.isdigit()][:200]
+    stock_ids = [sid for sid in all_stocks.keys() if len(sid) == 4 and sid.isdigit()][:30]
 
     foreign_list = []
     trust_list = []
