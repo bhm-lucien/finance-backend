@@ -9,8 +9,11 @@ import asyncio
 import os
 import time
 import discord
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 from discord.ext import tasks
+
+# 台灣時區
+TW_TZ = timezone(timedelta(hours=8))
 
 
 CHANNEL_ID = int(os.getenv("DISCORD_CHANNEL_ID", "0"))
@@ -30,7 +33,7 @@ def setup_realtime_scanner(bot):
         """每 2 分鐘掃描市場"""
         global _notified_today, _notified_sectors_today, _notified_breakout_today, _last_reset_date
 
-        now = datetime.now()
+        now = datetime.now(TW_TZ)
 
         # 每天重設已通知列表
         today_str = now.strftime("%Y-%m-%d")
@@ -189,7 +192,7 @@ def _build_hot_stock_embed(stock: dict) -> discord.Embed:
         title=f"🚀 飆股警報！{stock['stock_id']} {stock['name']}",
         description=f"**漲幅 +{stock['change_pct']:.1f}%** 突破近期高點！",
         color=0xFF4757,
-        timestamp=datetime.now(),
+        timestamp=datetime.now(TW_TZ),
     )
     embed.add_field(name="目前價", value=f"{stock['price']:.2f}", inline=True)
     embed.add_field(name="量比", value=f"{stock['vol_ratio']}x", inline=True)
@@ -266,7 +269,7 @@ def _build_sector_alert_embed(sector: dict) -> discord.Embed:
         title=f"{emoji} 板塊異動！{sector['name']} {sector['direction']}",
         description=f"**板塊平均漲幅 {arrow}{abs(sector['change_pct']):.2f}%**",
         color=color,
-        timestamp=datetime.now(),
+        timestamp=datetime.now(TW_TZ),
     )
 
     embed.add_field(name="板塊狀態", value=sector["status"], inline=True)
@@ -377,7 +380,7 @@ def _build_breakout_embed(stock: dict) -> discord.Embed:
         title=f"⚡ 關鍵突破！{stock['stock_id']} {stock['name']}",
         description=f"**{stock['breakout_type']}** — 現價 {stock['price']:.2f}（+{stock['change_pct']:.1f}%）",
         color=0xFFD700,
-        timestamp=datetime.now(),
+        timestamp=datetime.now(TW_TZ),
     )
 
     embed.add_field(name="突破類型", value=stock["breakout_type"], inline=True)

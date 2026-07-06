@@ -1,14 +1,15 @@
 """
 Discord Bot 定時推播排程器
 - 盤前 8:30：台指期夜盤 + 美股統整 + 5 檔強勢股
-- 盤後 14:00：今日總結
 - 盤後 14:30：每日 AI 日報（完整市場分析 + AI 展望）
 """
 import asyncio
 import discord
-from datetime import datetime, time as dt_time
+from datetime import datetime, time as dt_time, timezone, timedelta
 from discord.ext import tasks
 
+# 台灣時區
+TW_TZ = timezone(timedelta(hours=8))
 
 # 推播頻道 ID（舊的單一頻道作為 fallback）
 import os
@@ -25,7 +26,7 @@ def setup_scheduler(bot):
     async def check_schedule():
         """每分鐘檢查是否到了推播時間"""
         global _sent_today
-        now = datetime.now()
+        now = datetime.now(TW_TZ)
         current_time = now.strftime("%H:%M")
         today_str = now.strftime("%Y-%m-%d")
 
@@ -63,9 +64,9 @@ async def send_pre_market_report(bot):
         # 組裝 Embed
         embed = discord.Embed(
             title="🌅 盤前分析報告",
-            description=f"**{datetime.now().strftime('%Y/%m/%d')} 開盤前分析**",
+            description=f"**{datetime.now(TW_TZ).strftime('%Y/%m/%d')} 開盤前分析**",
             color=0x00D4FF,
-            timestamp=datetime.now(),
+            timestamp=datetime.now(TW_TZ),
         )
 
         # 台指期
@@ -129,7 +130,7 @@ async def send_pre_market_report(bot):
                 await channel.send(embed=embed)
             except Exception:
                 pass
-        print(f"[排程] 盤前報告已推送到 {len(channels)} 個頻道 ({datetime.now().strftime('%H:%M:%S')})")
+        print(f"[排程] 盤前報告已推送到 {len(channels)} 個頻道 ({datetime.now(TW_TZ).strftime('%H:%M:%S')})")
 
     except Exception as e:
         print(f"[排程] 盤前報告推送失敗: {e}")
@@ -154,9 +155,9 @@ async def send_daily_ai_report(bot):
         # 先發一個標題 Embed
         header = discord.Embed(
             title="📰 每日 AI 日報",
-            description=f"**{datetime.now().strftime('%Y/%m/%d')}（{_weekday_name()}）盤後完整分析**",
+            description=f"**{datetime.now(TW_TZ).strftime('%Y/%m/%d')}（{_weekday_name()}）盤後完整分析**",
             color=0x00D4FF,
-            timestamp=datetime.now(),
+            timestamp=datetime.now(TW_TZ),
         )
         header.set_footer(text="ECF-AI v0.3.0 | 以下為今日完整市場分析")
 
@@ -169,7 +170,7 @@ async def send_daily_ai_report(bot):
             except Exception:
                 pass
 
-        print(f"[排程] AI 日報已推送到 {len(channels)} 個頻道 ({datetime.now().strftime('%H:%M:%S')})")
+        print(f"[排程] AI 日報已推送到 {len(channels)} 個頻道 ({datetime.now(TW_TZ).strftime('%H:%M:%S')})")
 
     except Exception as e:
         import traceback
@@ -180,7 +181,7 @@ async def send_daily_ai_report(bot):
 def _weekday_name() -> str:
     """取得中文星期"""
     names = ["一", "二", "三", "四", "五", "六", "日"]
-    return f"週{names[datetime.now().weekday()]}"
+    return f"週{names[datetime.now(TW_TZ).weekday()]}"
 
 
 def _get_push_channels(bot) -> list:
