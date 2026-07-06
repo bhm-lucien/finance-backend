@@ -102,7 +102,7 @@ def calculate_radar_scores(stock_id: str, days: int = 120) -> dict:
     # ── 5. 法人 ──
     institutional_score = 50
     if not inst_df.empty and "name" in inst_df.columns:
-        foreign = inst_df[inst_df["name"].str.contains("外資", na=False)]
+        foreign = inst_df[inst_df["name"].str.contains("外資|Foreign_Investor", na=False)]
         if not foreign.empty and "buy" in foreign.columns:
             foreign_net = foreign["buy"].sum() - foreign["sell"].sum()
             if foreign_net > 0:

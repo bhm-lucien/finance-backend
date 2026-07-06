@@ -67,7 +67,7 @@ def analyze_main_force(stock_id: str, days: int = 60) -> dict:
         if "buy" in recent_inst.columns and "sell" in recent_inst.columns:
             net_buy = (recent_inst["buy"].sum() - recent_inst["sell"].sum())
             # 外資部分
-            foreign = recent_inst[recent_inst["name"].str.contains("外資", na=False)] if "name" in recent_inst.columns else pd.DataFrame()
+            foreign = recent_inst[recent_inst["name"].str.contains("外資|Foreign_Investor", na=False)] if "name" in recent_inst.columns else pd.DataFrame()
             if not foreign.empty:
                 foreign_net = foreign["buy"].sum() - foreign["sell"].sum()
 

@@ -232,8 +232,8 @@ def _build_chip_summary() -> tuple[discord.Embed, str]:
             foreign_buy = 0
             trust_buy = 0
             if "name" in inst_df.columns and "buy" in inst_df.columns and "sell" in inst_df.columns:
-                foreign = inst_df[inst_df["name"].str.contains("外資", na=False)]
-                trust = inst_df[inst_df["name"].str.contains("投信", na=False)]
+                foreign = inst_df[inst_df["name"].str.contains("外資|Foreign_Investor", na=False)]
+                trust = inst_df[inst_df["name"].str.contains("投信|Investment_Trust", na=False)]
                 if not foreign.empty:
                     foreign_buy = int(foreign["buy"].sum() - foreign["sell"].sum())
                 if not trust.empty:

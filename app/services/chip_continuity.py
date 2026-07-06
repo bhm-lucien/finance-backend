@@ -58,7 +58,7 @@ def analyze_chip_continuity(stock_id: str, days: int = 30) -> dict:
         inst_df = fetch_institutional_investors(stock_id, days=days)
         if not inst_df.empty and "name" in inst_df.columns:
             # 外資
-            foreign = inst_df[inst_df["name"].str.contains("外資", na=False)].copy()
+            foreign = inst_df[inst_df["name"].str.contains("外資|Foreign_Investor", na=False)].copy()
             if not foreign.empty and "buy" in foreign.columns and "sell" in foreign.columns:
                 foreign["net"] = foreign["buy"] - foreign["sell"]
                 # 按日期分組加總
@@ -70,7 +70,7 @@ def analyze_chip_continuity(stock_id: str, days: int = 30) -> dict:
                 result["foreign_streak"] = _calc_streak(daily_foreign["net"].tolist())
 
             # 投信
-            trust = inst_df[inst_df["name"].str.contains("投信", na=False)].copy()
+            trust = inst_df[inst_df["name"].str.contains("投信|Investment_Trust", na=False)].copy()
             if not trust.empty and "buy" in trust.columns and "sell" in trust.columns:
                 trust["net"] = trust["buy"] - trust["sell"]
                 trust["date_str"] = trust["date"].dt.strftime("%Y-%m-%d")
