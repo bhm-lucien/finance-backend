@@ -65,7 +65,7 @@ async def on_ready():
 async def stock_command(interaction: discord.Interaction, stock_id: str):
     """
     /stock 指令 — 查詢個股 AI 操盤建議
-    支援代碼（2330）或名稱（台積電）
+    兩階段回覆：先送即時報價，再補上完整分析
     """
     await interaction.response.defer(thinking=True)
 
@@ -78,33 +78,49 @@ async def stock_command(interaction: discord.Interaction, stock_id: str):
                 await interaction.followup.send(f"❌ 找不到「{stock_id}」對應的股票，請確認名稱或直接輸入代碼")
                 return
 
-        # 呼叫分析函式
-        from app.indicators.trading_advice import generate_trading_advice
+        # 第一階段：快速回覆即時報價（1-2 秒）
         from app.services.realtime import fetch_realtime_price
-        from app.indicators.kline_pattern import analyze_kline_patterns
-
-        # 取得即時報價
         rt = fetch_realtime_price(actual_id)
         price = rt.get("price", 0)
         change = rt.get("change", 0)
         change_pct = rt.get("change_pct", 0)
         name = rt.get("name", actual_id)
 
-        # 取得 AI 操盤建議
-        advice = generate_trading_advice(actual_id)
-        if advice.get("error"):
-            await interaction.followup.send(f"❌ 無法分析 {actual_id}：{advice['error']}")
-            return
+        color = 0xFF4757 if change >= 0 else 0x00FF88
+        arrow = "▲" if change >= 0 else "▼"
 
-        # 取得 K 線型態
-        kline = analyze_kline_patterns(actual_id)
+        quick_embed = discord.Embed(
+            title=f"📈 {actual_id} {name}",
+            description=f"**{price:.2f}** {arrow} {abs(change):.2f} ({abs(change_pct):.2f}%)",
+            color=color,
+        )
+        quick_embed.add_field(name="⏳", value="AI 分析計算中，請稍候...", inline=False)
+        quick_embed.set_footer(text="ECF-AI")
 
-        # 組裝 Embed 訊息
-        embed = _build_stock_embed(actual_id, name, price, change, change_pct, advice, kline)
-        await interaction.followup.send(embed=embed)
+        msg = await interaction.followup.send(embed=quick_embed, wait=True)
+
+        # 第二階段：完整分析（可能較慢）
+        try:
+            from app.indicators.trading_advice import generate_trading_advice
+            from app.indicators.kline_pattern import analyze_kline_patterns
+
+            advice = generate_trading_advice(actual_id)
+            if advice.get("error"):
+                quick_embed.set_field_at(0, name="❌", value=f"無法分析：{advice['error']}", inline=False)
+                await msg.edit(embed=quick_embed)
+                return
+
+            kline = analyze_kline_patterns(actual_id)
+            full_embed = _build_stock_embed(actual_id, name, price, change, change_pct, advice, kline)
+            await msg.edit(embed=full_embed)
+
+        except Exception as e:
+            # 分析失敗但至少有報價
+            quick_embed.set_field_at(0, name="⚠️", value=f"完整分析暫時無法取得：{str(e)[:100]}\n報價資訊如上", inline=False)
+            await msg.edit(embed=quick_embed)
 
     except Exception as e:
-        await interaction.followup.send(f"❌ 分析 {stock_id} 時發生錯誤：{str(e)[:200]}")
+        await interaction.followup.send(f"❌ 查詢 {stock_id} 時發生錯誤：{str(e)[:200]}")
 
 
 @bot.tree.command(name="premarket", description="手動取得盤前分析報告")
