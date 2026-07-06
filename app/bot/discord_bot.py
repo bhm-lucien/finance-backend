@@ -107,6 +107,57 @@ async def stock_command(interaction: discord.Interaction, stock_id: str):
         await interaction.followup.send(f"❌ 分析 {stock_id} 時發生錯誤：{str(e)[:200]}")
 
 
+@bot.tree.command(name="premarket", description="手動取得盤前分析報告")
+async def premarket_command(interaction: discord.Interaction):
+    """手動觸發盤前報告"""
+    await interaction.response.defer(thinking=True)
+
+    try:
+        from app.services.futures import fetch_taiwan_futures
+        from app.services.us_market import fetch_us_market_summary
+        from app.services.stock_screener import screen_strong_stocks
+
+        futures = fetch_taiwan_futures()
+        us_market = fetch_us_market_summary()
+        strong_stocks = screen_strong_stocks(top_n=5)
+
+        embed = discord.Embed(
+            title="🌅 盤前分析報告",
+            description="手動查詢",
+            color=0x00D4FF,
+        )
+
+        # 台指期
+        if futures["price"] > 0:
+            arrow = "▲" if futures["change"] >= 0 else "▼"
+            embed.add_field(
+                name="📊 台指期",
+                value=f"**{futures['price']:.0f}** {arrow}{abs(futures['change']):.0f} ({abs(futures['change_pct']):.2f}%)\n盤別：{futures['session']}",
+                inline=False,
+            )
+
+        # 美股
+        if us_market["indices"]:
+            us_text = ""
+            for idx in us_market["indices"]:
+                arrow = "▲" if idx["change_pct"] >= 0 else "▼"
+                us_text += f"{idx['name']}：{arrow}{abs(idx['change_pct']):.2f}%\n"
+            embed.add_field(name="🇺🇸 美股", value=us_text, inline=True)
+
+        # 強勢股
+        if strong_stocks:
+            stock_text = ""
+            for i, s in enumerate(strong_stocks[:5], 1):
+                stock_text += f"{i}. **{s['stock_id']} {s['name']}**（+{s['change_pct']:.1f}%）\n"
+            embed.add_field(name="🔥 強勢股", value=stock_text, inline=False)
+
+        embed.set_footer(text="⚠️ 僅供參考 | ECF-AI")
+        await interaction.followup.send(embed=embed)
+
+    except Exception as e:
+        await interaction.followup.send(f"❌ 盤前報告生成失敗：{str(e)[:200]}")
+
+
 @bot.tree.command(name="subscribe", description="訂閱推播：設定目前頻道接收即時通知（管理者限定）")
 async def subscribe_command(interaction: discord.Interaction):
     """設定推播頻道"""
@@ -153,6 +204,7 @@ async def help_command(interaction: discord.Interaction):
             "`/top` — 今日全市場強勢股 TOP 5\n"
             "`/strong_industry 半導體` — 特定產業強勢股\n"
             "`/market` — 美股 + 台指期 + 費半前三\n"
+            "`/premarket` — 手動取得盤前報告\n"
             "`/subscribe` — 訂閱推播到本頻道\n"
             "`/unsubscribe` — 取消推播訂閱\n"
             "`/help` — 顯示此說明"
