@@ -22,25 +22,39 @@ _sent_today: dict[str, str] = {}  # key: "pre"/"after"/"daily", value: "YYYY-MM-
 def setup_scheduler(bot):
     """設定定時任務"""
 
+    _sending = False  # 防止重入
+
     @tasks.loop(minutes=1)
     async def check_schedule():
         """每分鐘檢查是否到了推播時間"""
+        nonlocal _sending
         global _sent_today
+
+        if _sending:
+            return
+        
         now = datetime.now(TW_TZ)
         current_time = now.strftime("%H:%M")
         today_str = now.strftime("%Y-%m-%d")
 
         if current_time == "08:30" and _sent_today.get("pre") != today_str:
-            # 週末不推播（週六=5, 週日=6）
             if now.weekday() >= 5:
                 return
+            _sending = True
             _sent_today["pre"] = today_str
-            await send_pre_market_report(bot)
+            try:
+                await send_pre_market_report(bot)
+            finally:
+                _sending = False
         elif current_time == "14:30" and _sent_today.get("daily") != today_str:
             if now.weekday() >= 5:
                 return
+            _sending = True
             _sent_today["daily"] = today_str
-            await send_daily_ai_report(bot)
+            try:
+                await send_daily_ai_report(bot)
+            finally:
+                _sending = False
 
     @check_schedule.before_loop
     async def before_check():
