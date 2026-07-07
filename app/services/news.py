@@ -114,24 +114,19 @@ def fetch_finance_news(stock_id: str = "", limit: int = 15) -> list:
     except Exception:
         pass
 
-    # 6. 工商日報 RSS
+    # 6. 工商時報（透過 Google News 搜尋）
     try:
-        ctee_feeds = [
-            ("https://ctee.com.tw/feed", "財經"),
-        ]
-        for feed_url, category in ctee_feeds:
-            feed = feedparser.parse(feed_url)
-            for entry in feed.entries[:6]:
-                title = entry.get("title", "")
-                # 只取財經/股市相關
-                if any(kw in title for kw in ["股", "台", "半導體", "AI", "營收", "漲", "跌", "法人", "外資", "投信"]):
-                    all_news.append({
-                        "title": title,
-                        "link": entry.get("link", ""),
-                        "source": "工商時報",
-                        "time": _parse_time(entry.get("published", "")),
-                        "category": category,
-                    })
+        ctee_url = "https://news.google.com/rss/search?q=site:ctee.com.tw+股市+台股&hl=zh-TW&gl=TW&ceid=TW:zh-Hant"
+        feed = feedparser.parse(ctee_url)
+        for entry in feed.entries[:6]:
+            title = entry.get("title", "").split(" - ")[0]
+            all_news.append({
+                "title": title,
+                "link": entry.get("link", ""),
+                "source": "工商時報",
+                "time": _parse_time(entry.get("published", "")),
+                "category": "台股",
+            })
     except Exception:
         pass
 
