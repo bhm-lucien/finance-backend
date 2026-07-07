@@ -15,7 +15,7 @@ from app.services.industry import fetch_industry_classification
 
 
 _sector_flow_cache: dict[str, dict] = {}
-CACHE_TTL = 120  # 2 分鐘快取（盤中即時資料不需要太長）
+CACHE_TTL = 60  # 1 分鐘快取（盤中即時資料需要夠新鮮）
 
 
 def fetch_sector_flow(days: int = 5) -> dict:
@@ -166,37 +166,54 @@ def _fetch_today_market_full() -> dict[str, dict]:
         is_market_hours = (9 <= now.hour < 14) and now.weekday() < 5
 
         if is_market_hours:
-            # 盤中：使用 mis.twse 即時報價（批量）
+            # 盤中：使用 mis.twse 即時報價（分批，每次最多 20 檔）
             try:
                 import time as t
-                # 取得全市場即時報價（TAIEX 成分股）
-                stock_codes = "|".join([f"tse_{sid}.tw" for sid in _get_main_stock_ids()])
-                url = f"https://mis.twse.com.tw/stock/api/getStockInfo.jsp?ex_ch={stock_codes}&json=1&delay=0&_={int(t.time()*1000)}"
-                headers = {"User-Agent": "Mozilla/5.0", "Referer": "https://mis.twse.com.tw/"}
-                response = requests.get(url, headers=headers, timeout=15)
-                data = response.json()
+                stock_ids = _get_main_stock_ids()
 
-                for item in data.get("msgArray", []):
-                    stock_id = item.get("c", "").strip()
-                    if not stock_id or len(stock_id) != 4:
-                        continue
+                # 分批查詢（每次 20 檔）
+                batch_size = 20
+                for batch_start in range(0, len(stock_ids), batch_size):
+                    batch = stock_ids[batch_start:batch_start + batch_size]
+                    stock_codes = "|".join([f"tse_{sid}.tw" for sid in batch])
+                    url = f"https://mis.twse.com.tw/stock/api/getStockInfo.jsp?ex_ch={stock_codes}&json=1&delay=0&_={int(t.time()*1000)}"
+                    headers = {"User-Agent": "Mozilla/5.0", "Referer": "https://mis.twse.com.tw/"}
 
                     try:
-                        # z=成交價, y=昨收, v=累積成交量
-                        price = float(item.get("z", "0").replace("-", "0"))
-                        yesterday = float(item.get("y", "0").replace("-", "0"))
-                        volume = int(item.get("v", "0").replace("-", "0").replace(",", ""))
+                        response = requests.get(url, headers=headers, timeout=10)
+                        data = response.json()
 
-                        if price > 0 and yesterday > 0:
-                            change_pct = round((price - yesterday) / yesterday * 100, 2)
-                            result[stock_id] = {
-                                "change_pct": change_pct,
-                                "volume": volume,
-                                "turnover": 0,
-                                "close": price,
-                            }
-                    except (ValueError, TypeError):
+                        for item in data.get("msgArray", []):
+                            stock_id = item.get("c", "").strip()
+                            if not stock_id or len(stock_id) != 4:
+                                continue
+
+                            try:
+                                price_str = item.get("z", "").replace("-", "")
+                                yesterday_str = item.get("y", "").replace("-", "")
+                                vol_str = item.get("v", "0").replace("-", "0").replace(",", "")
+
+                                if not price_str or not yesterday_str:
+                                    continue
+
+                                price = float(price_str)
+                                yesterday = float(yesterday_str)
+                                volume = int(vol_str)
+
+                                if price > 0 and yesterday > 0:
+                                    change_pct = round((price - yesterday) / yesterday * 100, 2)
+                                    result[stock_id] = {
+                                        "change_pct": change_pct,
+                                        "volume": volume,
+                                        "turnover": 0,
+                                        "close": price,
+                                    }
+                            except (ValueError, TypeError):
+                                continue
+                    except Exception:
                         continue
+
+                    time.sleep(0.3)  # 批次間隔
 
                 if result:
                     return result
