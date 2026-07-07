@@ -440,6 +440,17 @@ async def get_stock_report(stock_id: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.get("/podcasts")
+async def get_podcasts(podcast_id: str = "all", limit: int = 20):
+    """取得財經 Podcast 最新集數列表"""
+    from app.services.podcast import fetch_podcast_episodes
+    try:
+        result = fetch_podcast_episodes(podcast_id, limit)
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.post("/cache/clear")
 async def clear_cache():
     """清除所有快取"""
