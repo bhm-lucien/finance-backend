@@ -94,6 +94,47 @@ def fetch_finance_news(stock_id: str = "", limit: int = 15) -> list:
     except Exception:
         pass
 
+    # 5. 經濟日報 RSS
+    try:
+        udn_feeds = [
+            ("https://money.udn.com/rssfeed/news/1001/5588?ch=money", "台股"),
+            ("https://money.udn.com/rssfeed/news/1001/5590?ch=money", "國際"),
+            ("https://money.udn.com/rssfeed/news/1001/12017?ch=money", "產業"),
+        ]
+        for feed_url, category in udn_feeds:
+            feed = feedparser.parse(feed_url)
+            for entry in feed.entries[:4]:
+                all_news.append({
+                    "title": entry.get("title", ""),
+                    "link": entry.get("link", ""),
+                    "source": "經濟日報",
+                    "time": _parse_time(entry.get("published", "")),
+                    "category": category,
+                })
+    except Exception:
+        pass
+
+    # 6. 工商日報 RSS
+    try:
+        ctee_feeds = [
+            ("https://ctee.com.tw/feed", "財經"),
+        ]
+        for feed_url, category in ctee_feeds:
+            feed = feedparser.parse(feed_url)
+            for entry in feed.entries[:6]:
+                title = entry.get("title", "")
+                # 只取財經/股市相關
+                if any(kw in title for kw in ["股", "台", "半導體", "AI", "營收", "漲", "跌", "法人", "外資", "投信"]):
+                    all_news.append({
+                        "title": title,
+                        "link": entry.get("link", ""),
+                        "source": "工商時報",
+                        "time": _parse_time(entry.get("published", "")),
+                        "category": category,
+                    })
+    except Exception:
+        pass
+
     # 去重和排序（依時間排序，最新在前）
     seen_titles = set()
     unique_news = []
