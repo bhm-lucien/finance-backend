@@ -15,12 +15,14 @@ PODCASTS = {
         "rss": "https://feeds.soundon.fm/podcasts/5d10cece-e6f6-4f65-ac2e-6a2e45c0d2f0.xml",
         "apple_id": "1500839292",
         "notes_base_url": "https://www.jacksu.tw/tool/stock/gooaye-notes",
+        "podsight_base_url": None,
     },
     "yuting": {
         "name": "游庭皓的財經皓角",
         "rss": "https://feed.firstory.me/rss/user/ckr4cf1qn2u370870h02o73vu",
         "apple_id": "1488295306",
         "notes_base_url": None,
+        "podsight_base_url": "https://podsight.tw/yutinghao",
     },
 }
 
@@ -69,6 +71,7 @@ def fetch_podcast_episodes(podcast_id: str = "all", limit: int = 20) -> dict:
             "name": info["name"],
             "apple_id": info["apple_id"],
             "notes_base_url": info.get("notes_base_url"),
+            "podsight_base_url": info.get("podsight_base_url"),
             "episodes": episodes,
         })
 
