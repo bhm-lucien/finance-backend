@@ -127,11 +127,10 @@ def setup_realtime_scanner(bot):
 def _scan_for_hot_stocks() -> list[dict]:
     """
     掃描符合飆股條件的個股
-    條件：漲幅 > 3% + 突破近期高點 + 量能放大
+    條件：漲幅 > 3%（只用即時報價，不呼叫 FinMind）
     """
     from app.services.stock_list import fetch_all_stocks
     from app.services.realtime import fetch_realtime_price
-    from app.services.data_fetcher import fetch_stock_price
 
     hot_stocks = []
 
@@ -153,36 +152,23 @@ def _scan_for_hot_stocks() -> list[dict]:
                 if change_pct < 3:
                     continue
 
-                df = fetch_stock_price(stock["id"], days=20)
-                if len(df) < 10:
-                    continue
-
                 price = rt["price"]
-                high_20d = float(df["high"].tail(20).max())
+                volume = rt.get("volume", 0)
 
-                if price < high_20d * 0.98:
-                    continue
-
-                vol_today = rt.get("volume", 0)
-                vol_avg = float(df["volume"].tail(20).mean())
-                vol_ratio = vol_today / vol_avg if vol_avg > 0 else 0
-
-                if vol_ratio < 1.3:
-                    continue
-
+                # 簡化條件：漲幅 > 3% 就推播（不再依賴歷史資料）
                 hot_stocks.append({
                     "stock_id": stock["id"],
                     "name": stock.get("name", stock["id"]),
                     "price": price,
                     "change_pct": change_pct,
-                    "vol_ratio": round(vol_ratio, 1),
-                    "high_20d": round(high_20d, 2),
+                    "vol_ratio": 0,
+                    "high_20d": 0,
                 })
 
             except Exception:
                 continue
 
-            time.sleep(0.5)
+            time.sleep(0.3)
 
     except Exception:
         pass
@@ -300,15 +286,11 @@ def _build_sector_alert_embed(sector: dict) -> discord.Embed:
 
 def _scan_price_breakout() -> list[dict]:
     """
-    掃描關鍵價位突破
-    條件：
-    - 突破 MA60（60日均線）
-    - 突破近 60 日前高
-    且漲幅 > 1%（過濾假突破）
+    掃描關鍵價位突破（簡化版：只用即時報價判斷漲幅 > 5%）
+    不再呼叫 FinMind 取歷史資料
     """
     from app.services.stock_list import fetch_all_stocks
     from app.services.realtime import fetch_realtime_price
-    from app.services.data_fetcher import fetch_stock_price
 
     breakouts = []
 
@@ -318,7 +300,7 @@ def _scan_price_breakout() -> list[dict]:
             {"id": sid, "name": sname}
             for sid, sname in all_stocks.items()
             if len(sid) == 4 and sid.isdigit()
-        ][:80]  # 掃描更多股票
+        ][:80]
 
         for stock in stocks:
             try:
@@ -329,48 +311,22 @@ def _scan_price_breakout() -> list[dict]:
                 price = rt["price"]
                 change_pct = rt.get("change_pct", 0)
 
-                # 基本過濾：漲幅需 > 1%
-                if change_pct < 1:
-                    continue
-
-                df = fetch_stock_price(stock["id"], days=80)
-                if len(df) < 60:
-                    continue
-
-                # 計算 MA60
-                ma60 = float(df["close"].tail(60).mean())
-                yesterday_close = float(df["close"].iloc[-1])
-
-                # 突破 MA60：昨日收盤在 MA60 以下，今日站上
-                if yesterday_close < ma60 and price > ma60:
+                # 簡化：漲幅 > 5% 視為可能突破
+                if change_pct >= 5:
                     breakouts.append({
                         "stock_id": stock["id"],
                         "name": stock.get("name", stock["id"]),
                         "price": price,
                         "change_pct": change_pct,
-                        "breakout_type": "突破MA60",
-                        "key_price": round(ma60, 2),
-                        "volume": rt.get("volume", 0),
-                    })
-                    continue  # 一檔只報一種突破
-
-                # 突破近 60 日前高
-                high_60d = float(df["high"].tail(60).max())
-                if price > high_60d and yesterday_close <= high_60d:
-                    breakouts.append({
-                        "stock_id": stock["id"],
-                        "name": stock.get("name", stock["id"]),
-                        "price": price,
-                        "change_pct": change_pct,
-                        "breakout_type": "突破60日高",
-                        "key_price": round(high_60d, 2),
+                        "breakout_type": "強勢突破",
+                        "key_price": 0,
                         "volume": rt.get("volume", 0),
                     })
 
             except Exception:
                 continue
 
-            time.sleep(0.3)
+            time.sleep(0.2)
 
     except Exception:
         pass
