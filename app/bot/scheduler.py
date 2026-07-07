@@ -46,7 +46,7 @@ def setup_scheduler(bot):
                 await send_pre_market_report(bot)
             finally:
                 _sending = False
-        elif current_time == "14:30" and _sent_today.get("daily") != today_str:
+        elif current_time == "15:30" and _sent_today.get("daily") != today_str:
             if now.weekday() >= 5:
                 return
             _sending = True
