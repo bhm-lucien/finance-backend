@@ -15,7 +15,7 @@ from app.services.industry import fetch_industry_classification
 
 
 _sector_flow_cache: dict[str, dict] = {}
-CACHE_TTL = 300  # 5 分鐘快取
+CACHE_TTL = 120  # 2 分鐘快取（盤中即時資料不需要太長）
 
 
 def fetch_sector_flow(days: int = 5) -> dict:
@@ -150,7 +150,8 @@ def _determine_status(change_pct: float, turnover_billion: float) -> str:
 
 def _fetch_today_market_full() -> dict[str, dict]:
     """
-    取得今日全市場行情（漲跌幅 + 成交量 + 成交金額）
+    取得今日全市場即時行情（漲跌幅 + 成交量 + 成交金額）
+    盤中時間使用證交所即時報價，非盤中使用 STOCK_DAY_ALL
 
     Returns:
         {stock_id: {"change_pct": float, "volume": int, "turnover": float}}
@@ -158,7 +159,51 @@ def _fetch_today_market_full() -> dict[str, dict]:
     result = {}
 
     try:
-        # TWSE 全市場每日收盤行情
+        # 判斷是否為盤中時間
+        from datetime import datetime, timezone, timedelta
+        tw_tz = timezone(timedelta(hours=8))
+        now = datetime.now(tw_tz)
+        is_market_hours = (9 <= now.hour < 14) and now.weekday() < 5
+
+        if is_market_hours:
+            # 盤中：使用 mis.twse 即時報價（批量）
+            try:
+                import time as t
+                # 取得全市場即時報價（TAIEX 成分股）
+                stock_codes = "|".join([f"tse_{sid}.tw" for sid in _get_main_stock_ids()])
+                url = f"https://mis.twse.com.tw/stock/api/getStockInfo.jsp?ex_ch={stock_codes}&json=1&delay=0&_={int(t.time()*1000)}"
+                headers = {"User-Agent": "Mozilla/5.0", "Referer": "https://mis.twse.com.tw/"}
+                response = requests.get(url, headers=headers, timeout=15)
+                data = response.json()
+
+                for item in data.get("msgArray", []):
+                    stock_id = item.get("c", "").strip()
+                    if not stock_id or len(stock_id) != 4:
+                        continue
+
+                    try:
+                        # z=成交價, y=昨收, v=累積成交量
+                        price = float(item.get("z", "0").replace("-", "0"))
+                        yesterday = float(item.get("y", "0").replace("-", "0"))
+                        volume = int(item.get("v", "0").replace("-", "0").replace(",", ""))
+
+                        if price > 0 and yesterday > 0:
+                            change_pct = round((price - yesterday) / yesterday * 100, 2)
+                            result[stock_id] = {
+                                "change_pct": change_pct,
+                                "volume": volume,
+                                "turnover": 0,
+                                "close": price,
+                            }
+                    except (ValueError, TypeError):
+                        continue
+
+                if result:
+                    return result
+            except Exception as e:
+                print(f"[板塊資金] 即時報價失敗，改用 STOCK_DAY_ALL: {e}")
+
+        # 非盤中或即時失敗：使用 STOCK_DAY_ALL
         url = "https://openapi.twse.com.tw/v1/exchangeReport/STOCK_DAY_ALL"
         headers = {"User-Agent": "Mozilla/5.0", "Accept": "application/json"}
         response = requests.get(url, headers=headers, timeout=15)
@@ -189,6 +234,17 @@ def _fetch_today_market_full() -> dict[str, dict]:
         print(f"[板塊資金] 取得今日行情失敗: {e}")
 
     return result
+
+
+def _get_main_stock_ids() -> list[str]:
+    """取得主要股票代碼列表（用於批量即時報價）"""
+    try:
+        from app.services.stock_list import fetch_all_stocks
+        all_stocks = fetch_all_stocks()
+        return [sid for sid in all_stocks.keys() if len(sid) == 4 and sid.isdigit()][:100]
+    except Exception:
+        # Fallback 熱門股
+        return ["2330", "2317", "2454", "2308", "2303", "2412", "2881", "2882", "2886", "2891"]
 
 
 def _safe_float(val) -> float:

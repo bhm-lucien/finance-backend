@@ -5,9 +5,9 @@
 import time
 import requests
 
-# 快取（60 秒）
+# 快取（不快取，每次都取最新）
 _market_cache: dict[str, dict] = {}
-CACHE_TTL = 60
+CACHE_TTL = 0
 
 # 指數代碼對應
 MARKET_SYMBOLS = {
